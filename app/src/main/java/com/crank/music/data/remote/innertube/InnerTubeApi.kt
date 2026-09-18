@@ -19,12 +19,10 @@ import kotlinx.serialization.json.jsonPrimitive
 import javax.inject.Inject
 import javax.inject.Singleton
 
-private const val INNERTUBE_API_KEY = "AIzaSyAlcKRTPoDtxvuYsQ2qPmlmSU5KL8vUVw8"
-private const val INNERTUBE_BASE_URL = "https://music.youtube.com/youtubei/v1"
-
 @Singleton
 class InnerTubeApi @Inject constructor(
-    private val client: HttpClient
+    private val client: HttpClient,
+    private val innerTubeConfig: InnerTubeConfig
 ) {
     private val innerTubeContext = buildJsonObject {
         put("client", buildJsonObject {
@@ -45,7 +43,7 @@ class InnerTubeApi @Inject constructor(
             }
 
             val response: JsonObject = client.post {
-                url("$INNERTUBE_BASE_URL/search?key=$INNERTUBE_API_KEY")
+                url(innerTubeConfig.withMusicKey("search"))
                 contentType(ContentType.Application.Json)
                 setBody(requestBody)
             }.body()
@@ -134,7 +132,7 @@ class InnerTubeApi @Inject constructor(
             songs
         } catch (e: Exception) {
             Log.e("CRANK_INTEGRATION", "InnerTube search failed: ${e.message}", e)
-            Log.e("CRANK_INTEGRATION", "Search URL: $INNERTUBE_BASE_URL/search?key=$INNERTUBE_API_KEY")
+            Log.e("CRANK_INTEGRATION", "Search URL: ${innerTubeConfig.musicBaseUrl}/search")
             Log.e("CRANK_INTEGRATION", "Query: $query")
             emptyList()
         }
@@ -148,7 +146,7 @@ class InnerTubeApi @Inject constructor(
             }
 
             val response: JsonObject = client.post {
-                url("$INNERTUBE_BASE_URL/browse?key=$INNERTUBE_API_KEY")
+                url(innerTubeConfig.withMusicKey("browse"))
                 contentType(ContentType.Application.Json)
                 setBody(requestBody)
             }.body()
@@ -216,7 +214,7 @@ class InnerTubeApi @Inject constructor(
             albums
         } catch (e: Exception) {
             Log.e("CRANK_INTEGRATION", "InnerTube home failed: ${e.message}", e)
-            Log.e("CRANK_INTEGRATION", "Browse URL: $INNERTUBE_BASE_URL/browse?key=$INNERTUBE_API_KEY")
+            Log.e("CRANK_INTEGRATION", "Browse URL: ${innerTubeConfig.musicBaseUrl}/browse")
             emptyList()
         }
     }

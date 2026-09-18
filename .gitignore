@@ -1,0 +1,44 @@
+# Gradle
+.gradle/
+build/
+!gradle/wrapper/gradle-wrapper.jar
+
+# Android Studio / IntelliJ
+.idea/
+*.iml
+captures/
+.externalNativeBuild/
+.cxx/
+
+# Android build output
+app/build/
+*.apk
+*.aab
+*.ap_
+*.dex
+output-metadata.json
+
+# Local configuration — contains machine-specific SDK paths and any
+# per-developer secrets (e.g. INNERTUBE_API_KEY). NEVER commit this.
+local.properties
+
+# Signing material. A release keystore is the app's identity: anyone holding it
+# can ship updates as you. Keep it out of the repo entirely and distribute it to
+# CI via repository secrets.
+*.jks
+*.keystore
+keystore.properties
+signing.properties
+
+# Native / profiling
+*.so
+*.hprof
+*.log
+
+# OS noise
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# WorkBuddy AI local project data (memory + skills) — not source.
+.workbuddy-ai/

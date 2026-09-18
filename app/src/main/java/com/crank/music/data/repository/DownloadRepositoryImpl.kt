@@ -29,18 +29,30 @@ class DownloadRepositoryImpl @Inject constructor(
 
     override suspend fun downloadSong(song: Song) {
         try {
+            // A recognised-but-unsourced track has no audio behind it at all.
+            // Resolving its marker as a video ID would burn the whole fallback
+            // chain, and the catch below would then substitute a stock sample
+            // track — silently saving unrelated audio to the user's library.
+            if (!song.isPlayable) {
+                Log.e("CRANK_DOWNLOAD", "Refusing to download '${song.title}': no audio source")
+                return
+            }
+
             // Resolve the actual stream URL (may be a video ID)
             val target = if (song.streamUrl.isNotBlank()) song.streamUrl else song.id
             val streamUrl = if (target.startsWith("http://") || target.startsWith("https://")) {
                 target
             } else {
                 try {
-                    val resolved = streamResolver.getSongStreamUrl(target, song.title, song.artistName)
-                    resolved.url
+                    streamResolver.getSongStreamUrl(target, song.title, song.artistName).url
                 } catch (e: Exception) {
+                    // Previously this fell back to `song.artworkUrl`, or failing
+                    // that to a hardcoded soundhelix.com demo MP3. Downloading the
+                    // artwork URL as audio cannot succeed, and the demo MP3 meant a
+                    // failed lookup silently planted an unrelated song in the
+                    // library. A failed download should just be a failed download.
                     Log.e("CRANK_DOWNLOAD", "Failed to resolve stream URL for ${song.title}: ${e.message}")
-                    // Fall back to artwork URL as last resort (will likely fail but better than nothing)
-                    song.artworkUrl.ifBlank { "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3" }
+                    return
                 }
             }
 

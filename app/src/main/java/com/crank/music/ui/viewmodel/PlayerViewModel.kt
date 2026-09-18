@@ -161,13 +161,23 @@ class PlayerViewModel @Inject constructor(
         loadHistory()
         startPositionSaving()
         observeCurrentSongDownload()
+        // restoreLastPlayback() owns the queue when a saved session exists; it
+        // delegates to loadQueueFromRoom() otherwise. Running them concurrently
+        // would let the two sources race for _queue.value.
         restoreLastPlayback()
     }
 
     private fun restoreLastPlayback() {
         viewModelScope.launch {
             try {
-                val savedState = songDao.getPlaybackState() ?: return@launch
+                val savedState = songDao.getPlaybackState()
+
+                // No saved session: the queue table is still worth reading, since
+                // the user may have queued tracks without ever pressing play.
+                if (savedState == null) {
+                    loadQueueFromRoom()
+                    return@launch
+                }
 
                 val savedSong = Song(
                     id = savedState.songId,
@@ -180,9 +190,20 @@ class PlayerViewModel @Inject constructor(
                     streamUrl = savedState.songStreamUrl
                 )
 
+                // Clamp the restored position to the track's own length so a stale
+                // or corrupt value can never seek past the end of the media.
+                val restoredPositionMs = savedState.positionMs
+                    .coerceAtLeast(0L)
+                    .let { pos ->
+                        val knownDuration = savedState.songDurationMs
+                        if (knownDuration > 0L) pos.coerceAtMost(knownDuration) else pos
+                    }
+
                 _playerState.update {
                     it.copy(
                         currentSong = savedSong,
+                        progress = restoredPositionMs,
+                        duration = savedState.songDurationMs.coerceAtLeast(0L),
                         repeatMode = savedState.repeatMode,
                         shuffleModeEnabled = savedState.shuffleEnabled
                     )
@@ -191,28 +212,65 @@ class PlayerViewModel @Inject constructor(
                 player.repeatMode = savedState.repeatMode
                 player.shuffleModeEnabled = savedState.shuffleEnabled
 
-                val queueIds = savedState.queueJson.split(",").filter { it.isNotBlank() }
-                if (queueIds.isNotEmpty()) {
-                    val queueSongs = queueIds.mapNotNull { id ->
-                        val song = songDao.getSongById(id)
-                        if (song != null) {
-                            Song(
-                                id = song.id,
-                                title = song.title,
-                                artistName = song.artistName,
-                                albumId = song.albumId,
-                                durationMs = song.durationMs,
-                                artworkUrl = song.artworkUrl,
-                                isLocal = song.isLocal,
-                                streamUrl = song.streamUrl
-                            )
-                        } else null
-                    }
-                    _queue.value = queueSongs
-                    originalQueue = queueSongs
+                // Restore the actual media item so the user can hit play and
+                // resume in place. Only do this when we have something playable;
+                // neither a video ID nor an unresolved marker is enough to build a
+                // MediaItem, and handing the marker to ExoPlayer would surface a
+                // raw player error instead of the metadata-only state we want.
+                if (savedState.songStreamUrl.isNotBlank() && savedSong.isPlayable) {
+                    val mediaItem = MediaItem.Builder()
+                        .setMediaId(savedSong.id)
+                        .setUri(savedState.songStreamUrl)
+                        .setMediaMetadata(
+                            MediaMetadata.Builder()
+                                .setTitle(savedSong.title)
+                                .setArtist(savedSong.artistName)
+                                .setAlbumTitle(savedSong.albumId)
+                                .setArtworkUri(
+                                    if (savedSong.artworkUrl.isNotBlank()) savedSong.artworkUrl.toUri() else null
+                                )
+                                .build()
+                        )
+                        .build()
+
+                    player.setMediaItem(mediaItem)
+                    player.prepare()
+                    // seekTo() before any play() call positions the player; the
+                    // track stays paused so we don't surprise the user on launch.
+                    player.seekTo(restoredPositionMs)
+                    Log.d(
+                        "CRANK_PLAYER",
+                        "Restored position ${restoredPositionMs}ms for '${savedSong.title}'"
+                    )
+                } else {
+                    Log.d("CRANK_PLAYER", "Restored metadata only (no streamUrl) for '${savedSong.title}'")
                 }
 
-                Log.d("CRANK_PLAYER", "Restored: ${savedSong.title} by ${savedSong.artistName}, queue: ${queueIds.size} songs")
+                // Prefer the queue snapshot stored alongside the playback state,
+                // but fall back to the queue table when the ids no longer resolve
+                // (e.g. the song rows were pruned after the snapshot was written).
+                val queueIds = savedState.queueJson.split(",").filter { it.isNotBlank() }
+                val queueSongs = queueIds.mapNotNull { id ->
+                    val song = songDao.getSongById(id) ?: return@mapNotNull null
+                    Song(
+                        id = song.id,
+                        title = song.title,
+                        artistName = song.artistName,
+                        albumId = song.albumId,
+                        durationMs = song.durationMs,
+                        artworkUrl = song.artworkUrl,
+                        isLocal = song.isLocal,
+                        streamUrl = song.streamUrl
+                    )
+                }
+                if (queueSongs.isNotEmpty()) {
+                    _queue.value = queueSongs
+                    originalQueue = queueSongs
+                } else {
+                    loadQueueFromRoom()
+                }
+
+                Log.d("CRANK_PLAYER", "Restored: ${savedSong.title} by ${savedSong.artistName}, queue: ${queueSongs.size} songs")
             } catch (e: Exception) {
                 Log.e("CRANK_PLAYER", "Failed to restore playback: ${e.message}")
             }
@@ -246,22 +304,21 @@ class PlayerViewModel @Inject constructor(
         viewModelScope.launch {
             try {
                 songDao.getQueueItems().collect { queueEntities ->
-                    if (queueEntities.isNotEmpty() && _queue.value.isEmpty()) {
-                        val songs = queueEntities.sortedBy { it.queueOrder }.map { entity ->
-                            Song(
-                                id = entity.songId,
-                                title = entity.title,
-                                artistName = entity.artistName,
-                                albumId = entity.albumId,
-                                durationMs = entity.durationMs,
-                                artworkUrl = entity.artworkUrl,
-                                streamUrl = entity.streamUrl,
-                                isLocal = false
-                            )
-                        }
-                        _queue.value = songs
-                        originalQueue = songs.toList()
+                    if (_queue.value.isNotEmpty()) return@collect
+                    val songs = queueEntities.sortedBy { it.queueOrder }.map { entity ->
+                        Song(
+                            id = entity.songId,
+                            title = entity.title,
+                            artistName = entity.artistName,
+                            albumId = entity.albumId,
+                            durationMs = entity.durationMs,
+                            artworkUrl = entity.artworkUrl,
+                            streamUrl = entity.streamUrl,
+                            isLocal = false
+                        )
                     }
+                    _queue.value = songs
+                    originalQueue = songs.toList()
                 }
             } catch (e: Exception) {
                 Log.e("CRANK_PLAYER", "Failed to load queue: ${e.message}")
@@ -375,6 +432,40 @@ class PlayerViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Turns a [Song] into a playable URL.
+     *
+     * Returns `null` when the song has no playable source at all, so callers can
+     * report a specific reason rather than a generic failure.
+     *
+     * Throws whatever the resolver throws. Note that a [Song.streamUrl] which is
+     * already an absolute URL is passed through untouched (some sources hand back
+     * a direct CDN link), while anything else — a bare video ID, most commonly —
+     * is treated as an identifier to resolve.
+     */
+    private suspend fun resolvePlayableUrl(song: Song): String? {
+        if (!song.isPlayable) return null
+
+        val target = if (song.streamUrl.isNotBlank()) song.streamUrl else song.id
+        val streamData = if (target.startsWith("http://") || target.startsWith("https://")) {
+            com.crank.music.data.remote.StreamData(url = target)
+        } else {
+            musicRepository.getSongStreamUrl(target, song.title, song.artistName)
+        }
+        return streamData.url.takeIf { it.isNotBlank() }
+    }
+
+    /**
+     * Message shown when a recognised-but-unsourced track is played.
+     *
+     * Recognition returns metadata only — a title and an artist, with no audio
+     * attached. Saying so plainly, and pointing at the search box, is far more
+     * useful than the resolver exception this used to produce.
+     */
+    private fun unresolvedMessage(song: Song): String =
+        "This is a recognised track with no audio source yet. " +
+            "Search for \"${song.title}\" by ${song.artistName} to play it."
+
     fun playSong(song: Song) {
         val requestId = playRequestCounter.incrementAndGet()
 
@@ -388,20 +479,25 @@ class PlayerViewModel @Inject constructor(
             _playerState.update { it.copy(isLoading = true, errorMessage = null) }
 
             try {
-                val target = if (song.streamUrl.isNotBlank()) song.streamUrl else song.id
-
-                val streamData = if (target.startsWith("http://") || target.startsWith("https://")) {
-                    com.crank.music.data.remote.StreamData(url = target)
-                } else {
-                    musicRepository.getSongStreamUrl(target, song.title, song.artistName)
+                // A recognised-but-unsourced track carries a marker instead of a URL.
+                // Fail fast and explain it, rather than falling through to eight
+                // network round-trips that cannot succeed.
+                if (!song.isPlayable) {
+                    Log.d("CRANK_PLAYER", "Song '${song.title}' has no playable source (recognised only)")
+                    _playerState.update {
+                        it.copy(isLoading = false, errorMessage = unresolvedMessage(song))
+                    }
+                    return@launch
                 }
+
+                val resolvedUrl = resolvePlayableUrl(song)
 
                 if (requestId != playRequestCounter.get()) {
                     Log.d("CRANK_PLAYER", "Stale request $requestId discarded for: ${song.title}")
                     return@launch
                 }
 
-                if (streamData.url.isBlank()) {
+                if (resolvedUrl == null) {
                     Log.e("CRANK_PLAYER", "Empty stream URL for ${song.title} (${song.id})")
                     _playerState.update {
                         it.copy(isLoading = false, errorMessage = "No audio stream available for: ${song.title}")
@@ -409,11 +505,11 @@ class PlayerViewModel @Inject constructor(
                     return@launch
                 }
 
-                Log.d("CRANK_PLAYER", "Playing: ${song.title} (${song.id}) -> ${streamData.url.take(80)}...")
+                Log.d("CRANK_PLAYER", "Playing: ${song.title} (${song.id}) -> ${resolvedUrl.take(80)}...")
 
                 val mediaItem = MediaItem.Builder()
                     .setMediaId(song.id)
-                    .setUri(streamData.url)
+                    .setUri(resolvedUrl)
                     .setMediaMetadata(
                         MediaMetadata.Builder()
                             .setTitle(song.title)
@@ -430,7 +526,7 @@ class PlayerViewModel @Inject constructor(
 
                 _playerState.update {
                     it.copy(
-                        currentSong = song.copy(streamUrl = streamData.url),
+                        currentSong = song.copy(streamUrl = resolvedUrl),
                         isLoading = false,
                         errorMessage = null
                     )
@@ -637,16 +733,18 @@ class PlayerViewModel @Inject constructor(
             viewModelScope.launch {
                 _playerState.update { it.copy(isLoading = true, errorMessage = null) }
                 try {
-                    val target = if (prevSong.streamUrl.isNotBlank()) prevSong.streamUrl else prevSong.id
-                    val streamData = if (target.startsWith("http://") || target.startsWith("https://")) {
-                        com.crank.music.data.remote.StreamData(url = target)
-                    } else {
-                        musicRepository.getSongStreamUrl(target, prevSong.title, prevSong.artistName)
+                    if (!prevSong.isPlayable) {
+                        _playerState.update {
+                            it.copy(isLoading = false, errorMessage = unresolvedMessage(prevSong))
+                        }
+                        return@launch
                     }
-                    if (streamData.url.isNotBlank()) {
+
+                    val resolvedUrl = resolvePlayableUrl(prevSong)
+                    if (resolvedUrl != null) {
                         val mediaItem = MediaItem.Builder()
                             .setMediaId(prevSong.id)
-                            .setUri(streamData.url)
+                            .setUri(resolvedUrl)
                             .setMediaMetadata(
                                 MediaMetadata.Builder()
                                     .setTitle(prevSong.title)
@@ -661,9 +759,16 @@ class PlayerViewModel @Inject constructor(
                         player.play()
                         _playerState.update {
                             it.copy(
-                                currentSong = prevSong.copy(streamUrl = streamData.url),
+                                currentSong = prevSong.copy(streamUrl = resolvedUrl),
                                 isLoading = false,
                                 errorMessage = null
+                            )
+                        }
+                    } else {
+                        _playerState.update {
+                            it.copy(
+                                isLoading = false,
+                                errorMessage = "No audio stream available for: ${prevSong.title}"
                             )
                         }
                     }
