@@ -249,19 +249,21 @@ class InnerTubeApi @Inject constructor(
                 setBody(requestBody)
             }.body()
 
-            val contents = response["contents"]?.jsonObject
-                ?.get("singleColumnBrowseResultsRenderer")?.jsonObject
-                ?.get("tabs")?.jsonArray
-                ?.firstOrNull()?.jsonObject
-                ?.get("tabRenderer")?.jsonObject
-                ?.get("content")?.jsonObject
-                ?.get("sectionListRenderer")?.jsonObject
-                ?.get("contents")?.jsonArray
-                ?: return emptyList()
+            val browseContents = response["contents"]?.jsonObject ?: return emptyList()
+
+            // YouTube Music serves two different page layouts and the track list sits in a
+            // different place in each, so both are collected rather than assuming one.
+            //
+            // Measured on device: a real playlist/radio browse came back as
+            // `twoColumnBrowseResultsRenderer` with the shelf under `secondaryContents`, and the
+            // previous single-column-only lookup matched nothing — it returned zero tracks from a
+            // 3 MB response full of them, which is indistinguishable from "this album is empty".
+            val sections =
+                shelfSections(browseContents["singleColumnBrowseResultsRenderer"]?.jsonObject) +
+                    shelfSections(browseContents["twoColumnBrowseResultsRenderer"]?.jsonObject)
 
             val songs = mutableListOf<Song>()
-            for (section in contents) {
-                val sectionObj = section.jsonObject
+            for (sectionObj in sections) {
                 // Albums expose tracks via musicShelfRenderer; playlists via musicPlaylistShelfRenderer.
                 val shelf = sectionObj["musicShelfRenderer"]?.jsonObject
                     ?: sectionObj["musicPlaylistShelfRenderer"]?.jsonObject
@@ -296,6 +298,36 @@ class InnerTubeApi @Inject constructor(
     }
 
     /**
+     * Collects the section lists that can hold a track shelf from one browse-results renderer.
+     *
+     * Returns every candidate rather than the first, because a page may legitimately carry more
+     * than one shelf (an album's tracks plus a "more from this artist" shelf), and dropping the
+     * extras silently truncates a real tracklist.
+     *
+     * Both known locations are covered: `secondaryContents` (the two-column layout) and each
+     * tab's `content` (the single-column layout, and some two-column pages).
+     */
+    private fun shelfSections(renderer: JsonObject?): List<JsonObject> {
+        renderer ?: return emptyList()
+        val sections = mutableListOf<JsonObject>()
+
+        renderer["secondaryContents"]?.jsonObject
+            ?.get("sectionListRenderer")?.jsonObject
+            ?.get("contents")?.jsonArray
+            ?.forEach { sections += it.jsonObject }
+
+        renderer["tabs"]?.jsonArray?.forEach { tab ->
+            tab.jsonObject["tabRenderer"]?.jsonObject
+                ?.get("content")?.jsonObject
+                ?.get("sectionListRenderer")?.jsonObject
+                ?.get("contents")?.jsonArray
+                ?.forEach { sections += it.jsonObject }
+        }
+
+        return sections
+    }
+
+    /**
      * Pulls (title, artist, duration) out of a `musicResponsiveListItemRenderer`'s flex columns.
      * Shared shape with [searchMusic]'s per-item parse, kept local to avoid perturbing that path.
      */
@@ -303,7 +335,13 @@ class InnerTubeApi @Inject constructor(
         var title = "Unknown Track"
         var artistName = "Unknown Artist"
         var durationMs = 180_000L
-        val flexColumns = listItem["flexColumns"]?.jsonArray ?: return Triple(title, artistName, durationMs)
+        val flexColumns = listItem["flexColumns"]?.jsonArray
+            ?: return Triple(title, artistName, durationMs)
+
+        // Flatten the non-blank columns first. Skipping blanks matters because a row with no
+        // artist still emits an empty column, and indexing into the raw array would then read
+        // the album as the artist.
+        val texts = ArrayList<String>(flexColumns.size)
         for (column in flexColumns) {
             val runs = column.jsonObject
                 .get("musicResponsiveListItemFlexColumnRenderer")?.jsonObject
@@ -312,20 +350,32 @@ class InnerTubeApi @Inject constructor(
             val text = runs.joinToString("") {
                 it.jsonObject.get("text")?.jsonPrimitive?.content ?: ""
             }.trim()
-            when {
-                text.isBlank() -> continue
-                runs.size == 1 && text.contains(":") -> durationMs = parseDuration(text)
-                else -> {
-                    val firstRunText = runs.firstOrNull()?.jsonObject?.get("text")?.jsonPrimitive?.content ?: ""
-                    if (title == "Unknown Track" && firstRunText.isNotBlank() && !firstRunText.contains(":")) {
-                        title = firstRunText
-                    } else if (artistName == "Unknown Artist" && runs.size > 1) {
-                        artistName = text
-                    }
-                }
-            }
+            if (text.isNotBlank()) texts += text
         }
+        if (texts.isEmpty()) return Triple(title, artistName, durationMs)
+
+        // Position carries the meaning in a music shelf row: title, then artist, then album, with
+        // the duration last. Reading by position is what lets a single-run artist column be
+        // recognised — the previous `runs.size > 1` test silently dropped every artist whose name
+        // was one run, which is most of them, and those rows rendered as "Unknown Artist".
+        title = texts.first()
+        durationMs = texts.firstOrNull(::looksLikeDuration)?.let { parseDuration(it) } ?: 180_000L
+        artistName = texts.drop(1).firstOrNull { !looksLikeDuration(it) } ?: "Unknown Artist"
+
         return Triple(title, artistName, durationMs)
+    }
+
+    /**
+     * True when [text] is a bare timestamp such as `3:45` or `1:02:33`.
+     *
+     * Kept strict — every part must be digits — because a loose `contains(":")` test mistakes
+     * titled tracks like "Intro: Serenade" for a duration and then shifts every later column.
+     */
+    private fun looksLikeDuration(text: String): Boolean {
+        if (!text.contains(':')) return false
+        val parts = text.split(':')
+        if (parts.size !in 2..3) return false
+        return parts.all { part -> part.trim().isNotEmpty() && part.trim().all { it.isDigit() } }
     }
 
     /**
