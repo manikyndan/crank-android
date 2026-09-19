@@ -174,20 +174,27 @@ fun SearchScreen(
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
                 if (hasTopResult) {
-                    // One decisive "Top Result" card instead of two equal-weight lists. The
-                    // songs list is the better default because tapping it starts playback
-                    // immediately, which is what most people came here to do.
+                    // One decisive "Top Result" card. An album whose title exactly
+                    // matches the query wins (the user named the album, not a song);
+                    // otherwise a song wins because tapping it plays immediately.
+                    val exactAlbum = uiState.filteredAlbums.firstOrNull {
+                        it.title.equals(uiState.searchQuery.trim(), ignoreCase = true)
+                    }
                     item {
                         SectionHeader(title = "Top Result")
                         TopResultCard(
-                            song = uiState.filteredSongs.firstOrNull(),
-                            album = uiState.filteredAlbums.firstOrNull(),
+                            song = if (exactAlbum == null) uiState.filteredSongs.firstOrNull() else null,
+                            album = exactAlbum ?: uiState.filteredAlbums.firstOrNull(),
                             onClick = {
-                                val song = uiState.filteredSongs.firstOrNull()
-                                if (song != null) {
-                                    onSongSelectWithContext(song, uiState.filteredSongs)
+                                if (exactAlbum != null) {
+                                    onAlbumClick(exactAlbum)
                                 } else {
-                                    uiState.filteredAlbums.firstOrNull()?.let { onAlbumClick(it) }
+                                    val song = uiState.filteredSongs.firstOrNull()
+                                    if (song != null) {
+                                        onSongSelectWithContext(song, uiState.filteredSongs)
+                                    } else {
+                                        uiState.filteredAlbums.firstOrNull()?.let { onAlbumClick(it) }
+                                    }
                                 }
                             }
                         )

@@ -37,6 +37,9 @@ class InnerTubeApi @Inject constructor(
         /** The result type search must keep; the others are not playable as tracks. */
         private const val SONG_CATEGORY = "Song"
 
+        /** YouTube addresses albums/singles/EPs with browse ids starting `MPRE`. */
+        private const val ALBUM_BROWSE_PREFIX = "MPRE"
+
         /** Renderers that can hold `musicResponsiveListItemRenderer` rows. See [listRowsIn]. */
         private val ROW_CONTAINERS = listOf(
             "musicShelfRenderer",
@@ -135,6 +138,117 @@ class InnerTubeApi @Inject constructor(
             Log.e("CRANK_INTEGRATION", "Query: $query")
             emptyList()
         }
+    }
+
+    /**
+     * Album results for a free-text query, e.g. "So Close to What" -> the Tate
+     * McRae album card rather than just its songs.
+     *
+     * ## Why a separate method instead of widening [searchMusic]
+     *
+     * That method deliberately keeps only `Song` rows because its callers play
+     * whatever comes back. Mixing album cards into it would hand an unplayable
+     * browse id to the player. Albums live in `musicTwoRowItemRenderer` cards
+     * (same shape as the home feed), so they get their own parse with their own
+     * filter: only `MPRE*` browse ids are albums/singles/EPs — `VL*` and `UC*`
+     * cards are playlists and artists, not albums.
+     *
+     * The response order is the relevance order YouTube returned; callers must
+     * not re-sort it.
+     */
+    suspend fun searchAlbums(query: String): List<Album> {
+        if (query.isBlank()) return emptyList()
+
+        return try {
+            val requestBody = buildJsonObject {
+                put("context", innerTubeContext)
+                put("query", JsonPrimitive(query))
+            }
+
+            val response: JsonObject = client.post {
+                url(innerTubeConfig.withMusicKey("search"))
+                contentType(ContentType.Application.Json)
+                setBody(requestBody)
+            }.body()
+
+            val contents = response["contents"]?.jsonObject
+                ?.get("tabbedSearchResultsRenderer")?.jsonObject
+                ?.get("tabs")?.jsonArray
+                ?: return emptyList()
+
+            val seen = LinkedHashSet<String>()
+            val albums = mutableListOf<Album>()
+
+            for (tab in contents) {
+                val sectionList = tab.jsonObject
+                    .get("tabRenderer")?.jsonObject
+                    ?.get("content")?.jsonObject
+                    ?.get("sectionListRenderer")?.jsonObject
+                    ?.get("contents")?.jsonArray
+                    ?: continue
+
+                for (section in sectionList) {
+                    for (card in twoRowItemsIn(section.jsonObject)) {
+                        val browseId = card
+                            .get("navigationEndpoint")?.jsonObject
+                            ?.get("browseEndpoint")?.jsonObject
+                            ?.get("browseId")?.jsonPrimitive?.content
+                            ?: continue
+                        if (!browseId.startsWith(ALBUM_BROWSE_PREFIX)) continue
+                        if (!seen.add(browseId)) continue
+
+                        val title = card
+                            .get("title")?.jsonObject
+                            ?.get("runs")?.jsonArray
+                            ?.firstOrNull()?.jsonObject
+                            ?.get("text")?.jsonPrimitive?.content ?: continue
+
+                        val subtitle = card
+                            .get("subtitle")?.jsonObject
+                            ?.get("runs")?.jsonArray
+                            ?.joinToString("") {
+                                it.jsonObject.get("text")?.jsonPrimitive?.content ?: ""
+                            } ?: ""
+
+                        val (artistName, year) = parseSearchAlbumSubtitle(subtitle)
+                        val artworkUrl = extractArtworkUrl(card)
+
+                        albums.add(
+                            Album(
+                                id = browseId,
+                                title = title,
+                                artistName = artistName,
+                                releaseYear = year,
+                                artworkUrl = artworkUrl,
+                                // Search cards carry no track count; 0 renders as unknown,
+                                // which is honest — the detail screen counts the real list.
+                                trackCount = 0
+                            )
+                        )
+                    }
+                }
+            }
+            albums
+        } catch (e: Exception) {
+            Log.e("CRANK_INTEGRATION", "InnerTube album search failed: ${e.message}", e)
+            emptyList()
+        }
+    }
+
+    /**
+     * Every `musicTwoRowItemRenderer` card in [section], across the same
+     * containers [listRowsIn] covers — search mixes song rows and album cards
+     * in the same shelves, so both collectors run over the same sections.
+     */
+    private fun twoRowItemsIn(section: JsonObject): List<JsonObject> {
+        val cards = mutableListOf<JsonObject>()
+        for (key in ROW_CONTAINERS) {
+            val contents = section[key]?.jsonObject?.get("contents")?.jsonArray ?: continue
+            for (item in contents) {
+                item.jsonObject["musicTwoRowItemRenderer"]?.jsonObject?.let { cards += it }
+            }
+        }
+        return cards
     }
 
     suspend fun getHomeData(): List<Album> {
@@ -706,6 +820,26 @@ internal fun parseAlbumSubtitle(subtitle: String): Pair<String, String> {
     val fields = subtitle.split("•").map { it.trim() }.filter { it.isNotEmpty() }
     val artist = fields.firstOrNull() ?: "Unknown Artist"
     val year = fields.drop(1)
+        .firstOrNull { it.length == 4 && it.all { c -> c.isDigit() } }
+        .orEmpty()
+    return artist to year
+}
+
+/**
+ * Reads (artist, releaseYear) out of a *search-result* album card's subtitle.
+ *
+ * Unlike the home feed ("Ed Sheeran • 2017"), search cards lead with the item
+ * type: "Album • Tate McRae • 2025" or "Single • Artist • 2024". The shared
+ * [parseAlbumSubtitle] would take that leading token as the artist and show
+ * every album as "by Album". The type token is therefore dropped first; the
+ * year rule (four digits only) is the same honest rule as there.
+ */
+internal fun parseSearchAlbumSubtitle(subtitle: String): Pair<String, String> {
+    val typeTokens = setOf("Album", "Single", "EP", "Playlist", "Artist")
+    val fields = subtitle.split("•").map { it.trim() }.filter { it.isNotEmpty() }
+    val withoutType = if (fields.firstOrNull() in typeTokens) fields.drop(1) else fields
+    val artist = withoutType.firstOrNull() ?: "Unknown Artist"
+    val year = withoutType.drop(1)
         .firstOrNull { it.length == 4 && it.all { c -> c.isDigit() } }
         .orEmpty()
     return artist to year

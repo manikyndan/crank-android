@@ -1,9 +1,9 @@
 package com.crank.music.ui.screens
 
 import android.view.HapticFeedbackConstants
+import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
@@ -11,6 +11,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.aspectRatio
@@ -29,7 +30,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
-import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Bedtime
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Download
@@ -37,7 +37,6 @@ import androidx.compose.material.icons.filled.Downloading
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.FormatQuote
-import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Pause
@@ -80,6 +79,7 @@ import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.media3.common.Player
 import coil3.compose.AsyncImage
 import com.crank.music.ui.components.PlaybackControlsSheet
@@ -101,7 +101,9 @@ fun NowPlayingScreen(
     onEqualizerClick: () -> Unit = {},
     onCrankAiClick: () -> Unit = {},
     onQueueClick: () -> Unit = {},
-    onLyricsClick: () -> Unit = {}
+    onLyricsClick: () -> Unit = {},
+    /** Optional: artist name tap. Defaults to no-op so existing call sites are untouched. */
+    onArtistClick: (String) -> Unit = {}
 ) {
     val playerState by playerViewModel.playerState.collectAsState()
     val song = playerState.currentSong
@@ -113,19 +115,19 @@ fun NowPlayingScreen(
 
     val view = LocalView.current
 
+    // Subtle scale pop whenever the track changes (replaces the old infinite
+    // breathing loop, which kept animating GPU layers for the whole session).
     val albumArtScale = remember { Animatable(1f) }
-    LaunchedEffect(playerState.isPlaying) {
-        if (playerState.isPlaying) {
-            while (true) {
-                albumArtScale.animateTo(
-                    targetValue = 1.02f,
-                    animationSpec = tween(3000, easing = LinearEasing)
+    LaunchedEffect(song?.id) {
+        if (song?.id != null) {
+            albumArtScale.snapTo(0.94f)
+            albumArtScale.animateTo(
+                targetValue = 1f,
+                animationSpec = spring(
+                    dampingRatio = 0.55f,
+                    stiffness = Spring.StiffnessLow
                 )
-                albumArtScale.animateTo(
-                    targetValue = 1f,
-                    animationSpec = tween(3000, easing = LinearEasing)
-                )
-            }
+            )
         }
     }
 
@@ -136,30 +138,39 @@ fun NowPlayingScreen(
     // Blurred artwork backdrop. Tinting it with the theme background instead of a fixed
     // colour is what lets this screen survive the switch to light mode.
     Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
-        if (song?.artworkUrl.orEmpty().isNotBlank()) {
-            AsyncImage(
-                model = song?.artworkUrl,
-                contentDescription = null,
-                contentScale = ContentScale.Crop,
-                modifier = Modifier
-                    .fillMaxSize()
-                    .blur(80.dp)
-                    .graphicsLayer { alpha = 0.35f }
-            )
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(
-                        Brush.verticalGradient(
-                            colors = listOf(
-                                MaterialTheme.colorScheme.background.copy(alpha = 0.55f),
-                                MaterialTheme.colorScheme.background.copy(alpha = 0.92f),
-                                MaterialTheme.colorScheme.background
-                            )
+        // Blurred artwork backdrop, cross-fading on track change. A primary-tinted
+        // wash on top gives the Apple-style color-matched feel without a Palette
+        // dependency; the theme-background scrim keeps light mode legible.
+        Crossfade(
+            targetState = song?.artworkUrl.orEmpty(),
+            animationSpec = tween(600),
+            label = "bg_artwork"
+        ) { artworkUrl ->
+            if (artworkUrl.isNotBlank()) {
+                AsyncImage(
+                    model = artworkUrl,
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .blur(90.dp)
+                        .graphicsLayer { alpha = 0.5f }
+                )
+            }
+        }
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.verticalGradient(
+                        colors = listOf(
+                            MaterialTheme.colorScheme.primary.copy(alpha = 0.14f),
+                            MaterialTheme.colorScheme.background.copy(alpha = 0.72f),
+                            MaterialTheme.colorScheme.background
                         )
                     )
-            )
-        }
+                )
+        )
 
         Column(
             modifier = Modifier
@@ -280,7 +291,16 @@ fun NowPlayingScreen(
                         style = MaterialTheme.typography.titleSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.clickable(
+                            enabled = song?.artistName != null,
+                            onClick = {
+                                song?.artistName?.let {
+                                    onArtistClick(it)
+                                    view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+                                }
+                            }
+                        )
                     )
                 }
                 LikeButton(
@@ -305,6 +325,13 @@ fun NowPlayingScreen(
                 modifier = Modifier.fillMaxWidth()
             )
 
+            // Elapsed left, total right (YouTube Music convention). Both grow
+            // slightly while scrubbing for visibility.
+            val timeScale by animateFloatAsState(
+                targetValue = if (isDragging) 1.18f else 1f,
+                animationSpec = tween(150),
+                label = "time_scale"
+            )
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween
@@ -312,13 +339,13 @@ fun NowPlayingScreen(
                 Text(
                     text = formatMs(playerState.progress),
                     style = MaterialTheme.typography.labelMedium,
+                    fontSize = 12.sp * timeScale,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Text(
-                    // Counting down is how every streaming player shows the tail of a track,
-                    // and it makes the number change as fast as the elapsed one.
-                    text = "-" + formatMs((playerState.duration - playerState.progress).coerceAtLeast(0L)),
+                    text = formatMs(playerState.duration),
                     style = MaterialTheme.typography.labelMedium,
+                    fontSize = 12.sp * timeScale,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
@@ -391,7 +418,10 @@ fun NowPlayingScreen(
                 }
             }
 
-            // Secondary actions, muted so they don't compete with the transport row.
+            // Bottom action bar: Lyrics, Up Next, Download. Each is an existing
+            // destination or ViewModel call — no dead buttons. Equalizer and
+            // Crank AI stay reachable from Settings; sleep timer and speed stay
+            // in the top bar, which is their only entry point.
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -399,28 +429,20 @@ fun NowPlayingScreen(
                 horizontalArrangement = Arrangement.SpaceEvenly,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                IconButton(onClick = onEqualizerClick) {
-                    Icon(
-                        imageVector = Icons.Default.GraphicEq,
-                        contentDescription = "Equalizer",
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(24.dp)
-                    )
-                }
-                IconButton(onClick = onQueueClick) {
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Filled.QueueMusic,
-                        contentDescription = "Queue",
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(24.dp)
-                    )
-                }
                 IconButton(onClick = onLyricsClick) {
                     Icon(
                         imageVector = Icons.Default.FormatQuote,
                         contentDescription = "Lyrics",
                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(24.dp)
+                        modifier = Modifier.size(26.dp)
+                    )
+                }
+                IconButton(onClick = onQueueClick) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.QueueMusic,
+                        contentDescription = "Up Next",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(26.dp)
                     )
                 }
                 IconButton(onClick = { playerViewModel.downloadCurrentSong() }) {
@@ -438,15 +460,7 @@ fun NowPlayingScreen(
                                 MaterialTheme.colorScheme.primary.copy(alpha = 0.7f)
                             else -> MaterialTheme.colorScheme.onSurfaceVariant
                         },
-                        modifier = Modifier.size(24.dp)
-                    )
-                }
-                IconButton(onClick = onCrankAiClick) {
-                    Icon(
-                        imageVector = Icons.Default.AutoAwesome,
-                        contentDescription = "Crank AI",
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(24.dp)
+                        modifier = Modifier.size(26.dp)
                     )
                 }
             }
@@ -493,13 +507,19 @@ private fun MorphingPlayPauseButton(
         label = "scale"
     )
 
-    // A flat accent disc. The old button layered a radial gold gradient, an embossed ring
-    // and two shadows on top of each other; at 72dp that reads as noise, and the gradient
-    // clashed with the flat surfaces everywhere else in the app.
+    // A flat accent disc, now larger and tactile (YouTube Music-style). The
+    // state-change spring below doubles as the tap bounce: pressing it always
+    // flips isPlaying, so every tap plays the scale animation.
     Box(
         modifier = modifier
-            .size(76.dp)
-            .graphicsLayer { scaleX = scale; scaleY = scale }
+            .size(84.dp)
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+                shadowElevation = 12.dp.toPx()
+                shape = CircleShape
+                clip = false
+            }
             .clip(CircleShape)
             .background(
                 if (isPlaying) {
@@ -510,7 +530,7 @@ private fun MorphingPlayPauseButton(
             ),
         contentAlignment = Alignment.Center
     ) {
-        IconButton(onClick = onClick) {
+        IconButton(onClick = onClick, modifier = Modifier.size(84.dp)) {
             Icon(
                 imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
                 contentDescription = if (isPlaying) "Pause" else "Play",
@@ -519,7 +539,7 @@ private fun MorphingPlayPauseButton(
                 } else {
                     MaterialTheme.colorScheme.background
                 },
-                modifier = Modifier.size(40.dp)
+                modifier = Modifier.size(46.dp)
             )
         }
     }

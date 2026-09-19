@@ -33,6 +33,7 @@ data class ITunesTrackDto(
 
 interface RemoteDataSource {
     suspend fun searchMusic(query: String): List<Song>
+    suspend fun searchAlbums(query: String): List<Album>
     suspend fun getHomeData(): List<Album>
 }
 
@@ -50,6 +51,26 @@ class RemoteDataSourceImpl @Inject constructor(
             }.body()
 
             response.results.mapNotNull { it.toSong() }
+        } catch (e: Exception) {
+            e.printStackTrace()
+            emptyList()
+        }
+    }
+
+    override suspend fun searchAlbums(query: String): List<Album> {
+        if (query.isBlank()) return emptyList()
+        return try {
+            val response: ITunesSearchResponse = client.get("https://itunes.apple.com/search") {
+                parameter("term", query)
+                parameter("media", "music")
+                parameter("entity", "album")
+                parameter("limit", 10)
+            }.body()
+
+            response.results
+                .filter { !it.collectionName.isNullOrBlank() }
+                .distinctBy { it.collectionId ?: it.collectionName }
+                .map { it.toAlbum() }
         } catch (e: Exception) {
             e.printStackTrace()
             emptyList()

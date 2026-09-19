@@ -43,6 +43,11 @@ class AlbumDetailViewModel @Inject constructor(
     private val albumTitle: String = savedStateHandle.get<String>("albumTitle").orEmpty()
     private val albumArtist: String = savedStateHandle.get<String>("albumArtist").orEmpty()
     private val browseId: String = savedStateHandle.get<String>("browseId").orEmpty()
+    // Carried from real album cards (e.g. search results) so the header shows the
+    // true year and cover instantly. Both default to "" for older routes that do
+    // not carry them — never a stand-in value.
+    private val initialYear: String = savedStateHandle.get<String>("releaseYear").orEmpty()
+    private val initialArtwork: String = savedStateHandle.get<String>("artworkUrl").orEmpty()
 
     private fun searchQuery(): String =
         listOf(albumTitle, albumArtist).filter { it.isNotBlank() }.joinToString(" ")
@@ -50,13 +55,11 @@ class AlbumDetailViewModel @Inject constructor(
     private val _uiState = MutableStateFlow(
         AlbumDetailUiState(
             album = Album(
-                id = albumTitle,
+                id = browseId.ifBlank { albumTitle },
                 title = albumTitle,
                 artistName = albumArtist.ifBlank { "Various Artists" },
-                // "" means unknown. The search response carries no release year, and the previous
-                // hardcoded "2024" was a guess presented as a fact.
-                releaseYear = "",
-                artworkUrl = "",
+                releaseYear = initialYear,
+                artworkUrl = initialArtwork,
                 trackCount = 0,
             ).takeIf { albumTitle.isNotBlank() }
         )
@@ -87,15 +90,20 @@ class AlbumDetailViewModel @Inject constructor(
                     musicRepository.search(searchQuery())
                 }
 
-                val artwork = results.firstOrNull()?.artworkUrl.orEmpty()
+                // The routed-in year/artwork win when present (they came from a real
+                // album card); otherwise fall back to what the tracklist carries.
+                // Track rows carry no release date, so without a routed-in year it
+                // stays blank rather than invented. Browse responses preserve the
+                // album's true track order, passed through untouched.
+                val artwork = initialArtwork.ifBlank { results.firstOrNull()?.artworkUrl.orEmpty() }
                 _uiState.value = AlbumDetailUiState(
                     album = Album(
-                        id = albumTitle,
+                        id = browseId.ifBlank { albumTitle },
                         title = albumTitle,
                         artistName = albumArtist.ifBlank {
                             results.firstOrNull()?.artistName ?: "Various Artists"
                         },
-                        releaseYear = "",
+                        releaseYear = initialYear,
                         artworkUrl = artwork,
                         trackCount = results.size,
                     ),

@@ -16,6 +16,16 @@ data class LyricsSearchResult(
 
 interface MusicRepository {
     suspend fun search(query: String): List<Song>
+
+    /**
+     * Album cards matching free text, in the backend's relevance order.
+     *
+     * Separate from [search] for the same reason browse is: songs are playable
+     * and albums are navigable, and mixing the two types in one list put
+     * unplayable ids in front of the player and album-less rows in front of
+     * the album screen.
+     */
+    suspend fun searchAlbums(query: String): List<Album>
     suspend fun getHomeRecommendations(): List<Album>
 
     /**

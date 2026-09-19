@@ -10,6 +10,7 @@ import com.crank.music.domain.model.Song
 import com.crank.music.domain.repository.MusicRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -129,41 +130,23 @@ class SearchViewModel @Inject constructor(
                 val showSongs = category == "All" || category == "Songs" || category == "Artists"
                 val showAlbums = category == "All" || category == "Albums"
 
-                val songs = if (showSongs) {
-                    musicRepository.search(query)
-                } else emptyList()
-
-                val albums = if (showAlbums) {
-                    try {
-                        musicRepository.getHomeRecommendations().filter {
-                            it.title.contains(query, ignoreCase = true) ||
-                                    it.artistName.contains(query, ignoreCase = true)
-                        }.ifEmpty {
-                            // Create album cards from song results if no album matches
-                            songs.groupBy { it.artistName }.mapNotNull { (artist, artistSongs) ->
-                                if (artistSongs.isNotEmpty() && artistSongs.any { it.title.contains(query, ignoreCase = true) }) {
-                                    Album(
-                                        id = "album_${artistSongs.first().id}",
-                                        title = artistSongs.first().let { "${it.title} - Single" },
-                                        artistName = artist,
-                                        // No release year is available from the search layer.
-                                        // Blank makes the UI omit the badge instead of printing
-                                        // a year that has nothing to do with the release.
-                                        releaseYear = "",
-                                        artworkUrl = artistSongs.first().artworkUrl,
-                                        trackCount = artistSongs.size
-                                    )
-                                } else null
-                            }
-                        }
-                    } catch (e: Exception) {
-                        emptyList()
-                    }
-                } else emptyList()
+                // Songs and albums are independent backend calls over different
+                // endpoints; running them together keeps result latency to the
+                // slower of the two rather than their sum.
+                val songsDeferred = async {
+                    if (showSongs) musicRepository.search(query) else emptyList()
+                }
+                val albumsDeferred = async {
+                    // Real album cards from the search backend. This replaced two
+                    // dishonest paths: text-filtering the home feed (which almost
+                    // never contained the album) and synthesising "Title - Single"
+                    // cards with ids no endpoint could resolve.
+                    if (showAlbums) musicRepository.searchAlbums(query) else emptyList()
+                }
 
                 _uiState.value = _uiState.value.copy(
-                    filteredSongs = songs,
-                    filteredAlbums = albums,
+                    filteredSongs = songsDeferred.await(),
+                    filteredAlbums = albumsDeferred.await(),
                     isLoading = false
                 )
             } catch (e: Exception) {

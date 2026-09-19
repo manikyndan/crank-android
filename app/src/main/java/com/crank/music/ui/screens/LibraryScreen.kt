@@ -1,29 +1,23 @@
 package com.crank.music.ui.screens
 
 import android.view.HapticFeedbackConstants
-import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutVertically
-import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -32,23 +26,24 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Sort
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Album
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.Share
-import androidx.compose.material.icons.automirrored.filled.ViewList
-import androidx.compose.material.icons.filled.ViewModule
-import androidx.compose.material3.AlertDialog
+import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.FolderOpen
+import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.MusicNote
+import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.ThumbUp
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -58,18 +53,14 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
-import androidx.compose.material3.ScrollableTabRow
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
-import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -77,9 +68,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
@@ -89,15 +80,31 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import coil3.compose.AsyncImage
+import com.crank.music.domain.model.Album
+import com.crank.music.domain.model.Collection
+import com.crank.music.domain.model.Playlist
 import com.crank.music.domain.model.Song
+import com.crank.music.ui.components.ShimmerBox
 import com.crank.music.ui.viewmodel.AlbumItem
 import com.crank.music.ui.viewmodel.ArtistItem
 import com.crank.music.ui.viewmodel.LibrarySection
 import com.crank.music.ui.viewmodel.LibraryViewModel
 import com.crank.music.ui.viewmodel.SmartPlaylist
+import com.crank.music.ui.viewmodel.SmartPlaylistKind
+import com.crank.music.ui.viewmodel.looksLikeOpaqueId
 import com.crank.music.ui.viewmodel.toDomainModel
 
-@OptIn(ExperimentalMaterial3Api::class)
+/**
+ * YouTube Music-style Library.
+ *
+ * Same public contract as before (identical parameters, so MainScreen needs no
+ * changes) and the same data (LibraryViewModel over the local database — no new
+ * backend, no invented content). Only the internal layout changed: header with
+ * sort, filter chips, pinned History/Liked rows, one vertical list of
+ * type-specific rows, per-filter empty states, and a 3-dot options sheet whose
+ * actions all resolve through existing navigation and ViewModel calls.
+ */
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun LibraryScreen(
     libraryViewModel: LibraryViewModel = hiltViewModel(),
@@ -105,190 +112,401 @@ fun LibraryScreen(
     onPlaylistClick: (String) -> Unit = {},
     onSmartPlaylistClick: (String) -> Unit = onPlaylistClick,
     onArtistClick: (String) -> Unit = {},
-    onAlbumClick: (com.crank.music.domain.model.Album) -> Unit = {},
+    onAlbumClick: (Album) -> Unit = {},
     onBrowseClick: () -> Unit = {}
 ) {
     val uiState by libraryViewModel.uiState.collectAsState()
     val view = LocalView.current
-    val sections = LibrarySection.ordered
+    var optionsTarget by remember { mutableStateOf<LibraryOptionsTarget?>(null) }
 
-    Box(modifier = Modifier.fillMaxSize()) {
-        Column(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
-            LibraryTopBar(
-                isGridView = uiState.isGridView,
-                isMultiSelectMode = uiState.isMultiSelectMode,
-                selectedCount = uiState.selectedItems.size,
-                onToggleView = {
-                    libraryViewModel.toggleViewMode()
-                    view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
-                },
-                onToggleMultiSelect = {
-                    libraryViewModel.toggleMultiSelectMode()
-                    view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
-                },
-                onSortFilterClick = {
-                    libraryViewModel.showSortFilterSheet()
-                    view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
-                },
-                onClearSelection = {
-                    libraryViewModel.selectNone()
-                    view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
-                }
-            )
+    fun haptic() = view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
 
-            LazyRow(
-                contentPadding = PaddingValues(horizontal = 20.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                items(sections) { section ->
-                    val isSelected = section == uiState.selectedSection
-                    val bgColor by animateColorAsState(
-                        targetValue = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
-                        animationSpec = tween(200), label = "bg"
-                    )
-                    val textColor by animateColorAsState(
-                        targetValue = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
-                        animationSpec = tween(200), label = "text"
-                    )
+    val mostPlayed = uiState.smartPlaylistContents[SmartPlaylistKind.MOST_PLAYED.slug].orEmpty()
+    val recentSongs = if (mostPlayed.isNotEmpty()) mostPlayed else uiState.recentlyAdded
+    val likedCount = uiState.songs.size
+    val historyCount = mostPlayed.size
 
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(50))
-                            .background(bgColor)
-                            .clickable {
-                                libraryViewModel.selectSection(section)
-                                view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
-                            }
-                            .padding(horizontal = 16.dp, vertical = 8.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = section.label,
-                            style = MaterialTheme.typography.labelLarge.copy(
-                                fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal
-                            ),
-                            color = textColor
-                        )
-                    }
-                }
-            }
+    // "Date Added" leaves lists in their stored order, which is newest-first for
+    // playlists; only "A to Z" reorders. Artists/albums already arrive sorted.
+    val visiblePlaylists = if (uiState.sortBy == "Name") {
+        uiState.playlists.sortedBy { it.title.lowercase() }
+    } else {
+        uiState.playlists
+    }
 
-            AnimatedContent(
-                targetState = uiState.selectedSection,
-                transitionSpec = {
-                    fadeIn(tween(300)) + slideInVertically(tween(300)) togetherWith
-                    fadeOut(tween(200)) + slideOutVertically(tween(200))
-                },
-                label = "section"
-            ) { section ->
-                when (section) {
-                    LibrarySection.PLAYLISTS -> PlaylistsSection(
-                        playlists = uiState.playlists,
-                        smartPlaylists = uiState.smartPlaylists,
-                        isGridView = uiState.isGridView,
-                        onCreateNew = {
-                            libraryViewModel.showCreateSheet()
-                            view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
-                        },
-                        onPlaylistClick = { onPlaylistClick(it) },
-                        onSmartPlaylistClick = { onSmartPlaylistClick(it) }
-                    )
-                    LibrarySection.ARTISTS -> ArtistsSection(
-                        artists = uiState.artists,
-                        onArtistClick = { onArtistClick(it) }
-                    )
-                    LibrarySection.ALBUMS -> AlbumsSection(
-                        albums = uiState.albums,
-                        onAlbumClick = { album: AlbumItem ->
-                            // The album route takes title + artist, not an id: the search
-                            // backend resolves albums by text. Passing the id we grouped on
-                            // would make the destination search for the id itself.
-                            onAlbumClick(album.toDomainModel())
-                        }
-                    )
-                    LibrarySection.SONGS -> SongsSection(
-                        songs = libraryViewModel.getFilteredSongs(),
-                        isGridView = uiState.isGridView,
-                        isMultiSelectMode = uiState.isMultiSelectMode,
-                        selectedItems = uiState.selectedItems,
-                        onSongSelect = onSongSelect,
-                        onToggleSelect = { libraryViewModel.toggleItemSelection(it) }
-                    )
-                    LibrarySection.DOWNLOADED -> DownloadedSection(
-                        songs = uiState.downloadedSongs,
-                        onSongSelect = onSongSelect,
-                        onFindMusic = onBrowseClick
-                    )
-                    LibrarySection.RECENTLY_ADDED -> RecentlyAddedSection(
-                        songs = uiState.recentlyAdded,
-                        onSongSelect = onSongSelect,
-                        onFindMusic = onBrowseClick
-                    )
-                    LibrarySection.ALL -> AllSection(
-                        playlists = uiState.playlists,
-                        smartPlaylists = uiState.smartPlaylists,
-                        songs = uiState.songs,
-                        isGridView = uiState.isGridView,
-                        isMultiSelectMode = uiState.isMultiSelectMode,
-                        selectedItems = uiState.selectedItems,
-                        onCreatePlaylist = {
-                            libraryViewModel.showCreateSheet()
-                            view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
-                        },
-                        onPlaylistClick = { onPlaylistClick(it) },
-                        onSmartPlaylistClick = { onSmartPlaylistClick(it) },
-                        onSongSelect = onSongSelect,
-                        onToggleSelect = { libraryViewModel.toggleItemSelection(it) },
-                        onSeeAllPlaylists = { libraryViewModel.selectSection(LibrarySection.PLAYLISTS) },
-                        onSeeAllSongs = { libraryViewModel.selectSection(LibrarySection.SONGS) },
-                        onFindMusic = onBrowseClick
-                    )
-                }
-            }
-        }
-
-        Box(
-            modifier = Modifier
-                .align(Alignment.BottomEnd)
-                .padding(20.dp)
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background)
+    ) {
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(bottom = 100.dp)
         ) {
-            Surface(
-                modifier = Modifier
-                    .size(60.dp),
-                shape = CircleShape,
-                color = MaterialTheme.colorScheme.primary,
-                onClick = {
-                    libraryViewModel.showCreateSheet()
-                    view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
-                }
-            ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Icon(
-                        imageVector = Icons.Default.Add,
-                        contentDescription = "Create Playlist",
-                        tint = MaterialTheme.colorScheme.onPrimary,
-                        modifier = Modifier.size(30.dp)
-                    )
+            item {
+                YtLibraryHeader(
+                    isMultiSelectMode = uiState.isMultiSelectMode,
+                    selectedCount = uiState.selectedItems.size,
+                    onSortClick = {
+                        libraryViewModel.showSortFilterSheet()
+                        haptic()
+                    },
+                    onClearSelection = {
+                        libraryViewModel.selectNone()
+                        libraryViewModel.toggleMultiSelectMode()
+                        haptic()
+                    }
+                )
+            }
+
+            item {
+                YtFilterChips(
+                    selected = uiState.selectedSection,
+                    onSelect = { section ->
+                        // Re-tapping the active filter returns to the overview.
+                        libraryViewModel.selectSection(
+                            if (section == uiState.selectedSection) LibrarySection.ALL else section
+                        )
+                        haptic()
+                    }
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+            }
+
+            if (uiState.isLoading && uiState.songs.isEmpty() && uiState.playlists.isEmpty()) {
+                item { YtLoadingRows() }
+            } else {
+                when (uiState.selectedSection) {
+                    LibrarySection.ALL -> {
+                        item {
+                            YtPinnedRow(
+                                icon = Icons.Default.History,
+                                iconTint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                tileColor = MaterialTheme.colorScheme.surfaceVariant,
+                                title = "History",
+                                subtitle = "Playlist • ${countSongs(historyCount)}",
+                                onClick = {
+                                    onPlaylistClick(Collection.RECENTLY_PLAYED.slug)
+                                    haptic()
+                                }
+                            )
+                        }
+                        item {
+                            YtPinnedRow(
+                                icon = Icons.Default.ThumbUp,
+                                iconTint = MaterialTheme.colorScheme.onPrimary,
+                                tileColor = MaterialTheme.colorScheme.primary,
+                                title = "Liked Music",
+                                subtitle = "Playlist • ${countSongs(likedCount)}",
+                                onClick = {
+                                    libraryViewModel.selectSection(LibrarySection.SONGS)
+                                    haptic()
+                                }
+                            )
+                        }
+                        item {
+                            YtNewPlaylistRow(onClick = {
+                                libraryViewModel.showCreateSheet()
+                                haptic()
+                            })
+                        }
+                        if (visiblePlaylists.isNotEmpty()) {
+                            item { YtListSubheader("Playlists") }
+                            items(visiblePlaylists.take(5), key = { it.id }) { playlist ->
+                                YtPlaylistRow(
+                                    playlist = playlist,
+                                    onClick = {
+                                        onPlaylistClick(playlist.id)
+                                        haptic()
+                                    },
+                                    onMenuClick = {
+                                        optionsTarget = LibraryOptionsTarget.UserPlaylist(playlist)
+                                        haptic()
+                                    }
+                                )
+                            }
+                        }
+                        val previewSongs = libraryViewModel.getFilteredSongs().take(5)
+                        if (previewSongs.isNotEmpty()) {
+                            item { YtListSubheader("Songs") }
+                            items(previewSongs, key = { it.id }) { song ->
+                                YtSongRow(
+                                    song = song,
+                                    isSelected = song.id in uiState.selectedItems,
+                                    isMultiSelectMode = uiState.isMultiSelectMode,
+                                    onClick = {
+                                        if (uiState.isMultiSelectMode) {
+                                            libraryViewModel.toggleItemSelection(song.id)
+                                        } else {
+                                            onSongSelect(song)
+                                        }
+                                        haptic()
+                                    },
+                                    onLongClick = {
+                                        if (!uiState.isMultiSelectMode) {
+                                            libraryViewModel.toggleMultiSelectMode()
+                                            libraryViewModel.toggleItemSelection(song.id)
+                                            haptic()
+                                        }
+                                    },
+                                    onToggleSelect = { libraryViewModel.toggleItemSelection(song.id) },
+                                    onMenuClick = {
+                                        optionsTarget = LibraryOptionsTarget.SongItem(song)
+                                        haptic()
+                                    }
+                                )
+                            }
+                        }
+                        if (visiblePlaylists.isEmpty() && previewSongs.isEmpty()) {
+                            item {
+                                YtEmptyState(
+                                    icon = Icons.Default.MusicNote,
+                                    title = "Your library is empty",
+                                    message = "Songs you like and playlists you create will show up here",
+                                    ctaText = "Browse music",
+                                    onCtaClick = onBrowseClick
+                                )
+                            }
+                        }
+                    }
+
+                    LibrarySection.RECENTLY_ADDED -> {
+                        if (recentSongs.isEmpty()) {
+                            item {
+                                YtEmptyState(
+                                    icon = Icons.Default.History,
+                                    title = "Nothing here yet",
+                                    message = "Music you play will show up here",
+                                    ctaText = "Browse music",
+                                    onCtaClick = onBrowseClick
+                                )
+                            }
+                        } else {
+                            items(recentSongs, key = { it.id }) { song ->
+                                YtSongRow(
+                                    song = song,
+                                    onClick = {
+                                        onSongSelect(song)
+                                        haptic()
+                                    },
+                                    onMenuClick = {
+                                        optionsTarget = LibraryOptionsTarget.SongItem(song)
+                                        haptic()
+                                    }
+                                )
+                            }
+                        }
+                    }
+
+                    LibrarySection.PLAYLISTS -> {
+                        item {
+                            YtNewPlaylistRow(onClick = {
+                                libraryViewModel.showCreateSheet()
+                                haptic()
+                            })
+                        }
+                        val smartVisible = uiState.smartPlaylists.filter {
+                            it.id != SmartPlaylistKind.MOST_PLAYED.slug
+                        }
+                        items(smartVisible, key = { it.id }) { smart ->
+                            YtSmartPlaylistRow(
+                                smart = smart,
+                                onClick = {
+                                    onSmartPlaylistClick(smart.id)
+                                    haptic()
+                                },
+                                onMenuClick = {
+                                    optionsTarget = LibraryOptionsTarget.SmartRow(smart)
+                                    haptic()
+                                }
+                            )
+                        }
+                        if (visiblePlaylists.isEmpty() && smartVisible.isEmpty()) {
+                            item {
+                                YtEmptyState(
+                                    icon = Icons.Default.FolderOpen,
+                                    title = "Playlists you create will show up here",
+                                    message = "Build your own collections of the music you love",
+                                    ctaText = "New playlist",
+                                    onCtaClick = {
+                                        libraryViewModel.showCreateSheet()
+                                        haptic()
+                                    }
+                                )
+                            }
+                        } else {
+                            items(visiblePlaylists, key = { it.id }) { playlist ->
+                                YtPlaylistRow(
+                                    playlist = playlist,
+                                    onClick = {
+                                        onPlaylistClick(playlist.id)
+                                        haptic()
+                                    },
+                                    onMenuClick = {
+                                        optionsTarget = LibraryOptionsTarget.UserPlaylist(playlist)
+                                        haptic()
+                                    }
+                                )
+                            }
+                        }
+                    }
+
+                    LibrarySection.SONGS -> {
+                        val songs = libraryViewModel.getFilteredSongs()
+                        if (songs.isEmpty()) {
+                            item {
+                                YtEmptyState(
+                                    icon = Icons.Default.MusicNote,
+                                    title = "Songs you save will show up here",
+                                    message = "Tap the like button on any song to keep it in your library",
+                                    ctaText = "Browse music",
+                                    onCtaClick = onBrowseClick
+                                )
+                            }
+                        } else {
+                            items(songs, key = { it.id }) { song ->
+                                YtSongRow(
+                                    song = song,
+                                    isSelected = song.id in uiState.selectedItems,
+                                    isMultiSelectMode = uiState.isMultiSelectMode,
+                                    onClick = {
+                                        if (uiState.isMultiSelectMode) {
+                                            libraryViewModel.toggleItemSelection(song.id)
+                                        } else {
+                                            onSongSelect(song)
+                                        }
+                                        haptic()
+                                    },
+                                    onLongClick = {
+                                        if (!uiState.isMultiSelectMode) {
+                                            libraryViewModel.toggleMultiSelectMode()
+                                            libraryViewModel.toggleItemSelection(song.id)
+                                            haptic()
+                                        }
+                                    },
+                                    onToggleSelect = { libraryViewModel.toggleItemSelection(song.id) },
+                                    onMenuClick = {
+                                        optionsTarget = LibraryOptionsTarget.SongItem(song)
+                                        haptic()
+                                    }
+                                )
+                            }
+                        }
+                    }
+
+                    LibrarySection.ALBUMS -> {
+                        if (uiState.albums.isEmpty()) {
+                            item {
+                                YtEmptyState(
+                                    icon = Icons.Default.Album,
+                                    title = "Albums you save will show up here",
+                                    message = "Albums from songs in your library appear automatically",
+                                    ctaText = "Browse albums",
+                                    onCtaClick = onBrowseClick
+                                )
+                            }
+                        } else {
+                            items(uiState.albums, key = { it.id }) { album ->
+                                YtAlbumRow(
+                                    album = album,
+                                    onClick = {
+                                        onAlbumClick(album.toDomainModel())
+                                        haptic()
+                                    },
+                                    onMenuClick = {
+                                        optionsTarget = LibraryOptionsTarget.AlbumRowItem(album)
+                                        haptic()
+                                    }
+                                )
+                            }
+                        }
+                    }
+
+                    LibrarySection.ARTISTS -> {
+                        if (uiState.artists.isEmpty()) {
+                            item {
+                                YtEmptyState(
+                                    icon = Icons.Default.Person,
+                                    title = "Artists you follow will show up here",
+                                    message = "Artists from songs in your library appear automatically",
+                                    ctaText = "Browse artists",
+                                    onCtaClick = onBrowseClick
+                                )
+                            }
+                        } else {
+                            items(uiState.artists, key = { it.id }) { artist ->
+                                YtArtistRow(
+                                    artist = artist,
+                                    onClick = {
+                                        onArtistClick(artist.id)
+                                        haptic()
+                                    },
+                                    onMenuClick = {
+                                        optionsTarget = LibraryOptionsTarget.ArtistRowItem(artist)
+                                        haptic()
+                                    }
+                                )
+                            }
+                        }
+                    }
+
+                    LibrarySection.DOWNLOADED -> {
+                        if (uiState.downloadedSongs.isEmpty()) {
+                            item {
+                                YtEmptyState(
+                                    icon = Icons.Default.Download,
+                                    title = "Music you download will show up here",
+                                    message = "Download songs to listen offline",
+                                    ctaText = "Browse music",
+                                    onCtaClick = onBrowseClick
+                                )
+                            }
+                        } else {
+                            item {
+                                Text(
+                                    text = countSongs(uiState.downloadedSongs.size) + " downloaded",
+                                    style = MaterialTheme.typography.labelLarge,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                                )
+                            }
+                            items(uiState.downloadedSongs, key = { it.id }) { song ->
+                                YtSongRow(
+                                    song = song,
+                                    onClick = {
+                                        onSongSelect(song)
+                                        haptic()
+                                    },
+                                    onMenuClick = {
+                                        optionsTarget = LibraryOptionsTarget.SongItem(song)
+                                        haptic()
+                                    }
+                                )
+                            }
+                        }
+                    }
                 }
             }
         }
 
         if (uiState.isMultiSelectMode && uiState.selectedItems.isNotEmpty()) {
-            MultiSelectBar(
-                selectedCount = uiState.selectedItems.size,
-                onSelectAll = {
-                    libraryViewModel.selectAll()
-                    view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
-                },
-                onDownload = {
-                    libraryViewModel.downloadSelectedSongs()
-                    view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
-                },
-                onDelete = {
-                    libraryViewModel.deleteSelectedSongs()
-                    view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
-                }
-            )
+            Box(modifier = Modifier.align(Alignment.BottomCenter)) {
+                MultiSelectBar(
+                    selectedCount = uiState.selectedItems.size,
+                    onSelectAll = {
+                        libraryViewModel.selectAll()
+                        haptic()
+                    },
+                    onDownload = {
+                        libraryViewModel.downloadSelectedSongs()
+                        haptic()
+                    },
+                    onDelete = {
+                        libraryViewModel.deleteSelectedSongs()
+                        haptic()
+                    }
+                )
+            }
         }
 
         if (uiState.showCreatePlaylistSheet) {
@@ -303,81 +521,148 @@ fun LibraryScreen(
                 onCoverSelect = { libraryViewModel.setCreatePlaylistCover(it) },
                 onCreate = {
                     libraryViewModel.createPlaylist()
-                    view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+                    haptic()
                 },
                 onDismiss = { libraryViewModel.hideCreateSheet() }
             )
         }
 
         if (uiState.showSortFilterSheet) {
-            SortFilterModal(
+            YtSortSheet(
                 currentSort = uiState.sortBy,
-                currentFilter = uiState.filterBy,
-                onSortSelect = { libraryViewModel.setSortBy(it) },
-                onFilterSelect = { libraryViewModel.setFilterBy(it) },
+                onSortSelect = {
+                    libraryViewModel.setSortBy(it)
+                    libraryViewModel.hideSortFilterSheet()
+                    haptic()
+                },
                 onDismiss = { libraryViewModel.hideSortFilterSheet() }
+            )
+        }
+
+        optionsTarget?.let { target ->
+            YtOptionsSheet(
+                target = target,
+                onPlaySong = {
+                    onSongSelect(it)
+                    optionsTarget = null
+                    haptic()
+                },
+                onOpenPlaylist = {
+                    onPlaylistClick(it)
+                    optionsTarget = null
+                    haptic()
+                },
+                onOpenSmart = {
+                    onSmartPlaylistClick(it)
+                    optionsTarget = null
+                    haptic()
+                },
+                onOpenArtist = {
+                    onArtistClick(it)
+                    optionsTarget = null
+                    haptic()
+                },
+                onOpenAlbum = {
+                    onAlbumClick(it)
+                    optionsTarget = null
+                    haptic()
+                },
+                onDeletePlaylist = {
+                    libraryViewModel.deletePlaylist(it)
+                    optionsTarget = null
+                    haptic()
+                },
+                onDismiss = { optionsTarget = null }
             )
         }
     }
 }
 
+/** Filter chips in YT order. Subscriptions has no backend here, so it is omitted
+ * rather than shown as a permanently empty tab. */
+private val YT_FILTER_ORDER = listOf(
+    LibrarySection.RECENTLY_ADDED to "Recent",
+    LibrarySection.PLAYLISTS to "Playlists",
+    LibrarySection.SONGS to "Songs",
+    LibrarySection.ALBUMS to "Albums",
+    LibrarySection.ARTISTS to "Artists",
+    LibrarySection.DOWNLOADED to "Downloads",
+)
+
+/** Sort values are the exact strings LibraryViewModel.getFilteredSongs matches on. */
+private val YT_SORT_OPTIONS = listOf(
+    "Date Added" to "Recently added",
+    "Name" to "A to Z",
+    "Artist" to "Artist",
+    "Duration" to "Duration",
+)
+
+private sealed interface LibraryOptionsTarget {
+    data class SongItem(val song: Song) : LibraryOptionsTarget
+    data class UserPlaylist(val playlist: Playlist) : LibraryOptionsTarget
+    data class SmartRow(val smart: SmartPlaylist) : LibraryOptionsTarget
+    data class ArtistRowItem(val artist: ArtistItem) : LibraryOptionsTarget
+    data class AlbumRowItem(val album: AlbumItem) : LibraryOptionsTarget
+}
+
+private fun countSongs(count: Int): String = if (count == 1) "1 song" else "$count songs"
+
+/** Recovers the display album title with the same rule the ViewModel groups on. */
+private fun displayAlbumTitle(song: Song): String =
+    song.albumId?.takeIf { it.isNotBlank() && !looksLikeOpaqueId(it) }
+        ?: song.artistName.ifBlank { "Unknown Album" }
+
+private fun albumForSong(song: Song): Album = Album(
+    id = song.albumId.orEmpty(),
+    title = displayAlbumTitle(song),
+    artistName = song.artistName,
+    releaseYear = "",
+    artworkUrl = song.artworkUrl,
+    trackCount = 0,
+)
+
 @Composable
-private fun LibraryTopBar(
-    isGridView: Boolean,
+private fun YtLibraryHeader(
     isMultiSelectMode: Boolean,
     selectedCount: Int,
-    onToggleView: () -> Unit,
-    onToggleMultiSelect: () -> Unit,
-    onSortFilterClick: () -> Unit,
-    onClearSelection: () -> Unit
+    onSortClick: () -> Unit,
+    onClearSelection: () -> Unit,
 ) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 20.dp, vertical = 16.dp),
+            .padding(horizontal = 16.dp, vertical = 12.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
         if (isMultiSelectMode) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = onClearSelection) {
-                    Icon(Icons.Default.Close, "Cancel", tint = MaterialTheme.colorScheme.onBackground, modifier = Modifier.size(22.dp))
+                    Icon(
+                        Icons.Default.Close,
+                        contentDescription = "Cancel selection",
+                        tint = MaterialTheme.colorScheme.onBackground,
+                        modifier = Modifier.size(22.dp)
+                    )
                 }
                 Text(
                     text = "$selectedCount selected",
                     style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
-                    color = MaterialTheme.colorScheme.primary
+                    color = MaterialTheme.colorScheme.onBackground
                 )
             }
         } else {
             Text(
-                text = "Your Library",
-                style = MaterialTheme.typography.headlineLarge,
+                text = "Library",
+                style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.Bold),
                 color = MaterialTheme.colorScheme.onBackground
             )
         }
-
-        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-            IconButton(onClick = onToggleMultiSelect) {
+        if (!isMultiSelectMode) {
+            IconButton(onClick = onSortClick) {
                 Icon(
-                    imageVector = Icons.Default.CheckCircle,
-                    contentDescription = "Multi-select",
-                    tint = if (isMultiSelectMode) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.size(22.dp)
-                )
-            }
-            IconButton(onClick = onSortFilterClick) {
-                Icon(
-                    imageVector = Icons.AutoMirrored.Filled.ViewList,
-                    contentDescription = "Sort & Filter",
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.size(22.dp)
-                )
-            }
-            IconButton(onClick = onToggleView) {
-                Icon(
-                    imageVector = if (isGridView) Icons.AutoMirrored.Filled.ViewList else Icons.Default.ViewModule,
-                    contentDescription = "Toggle View",
+                    imageVector = Icons.AutoMirrored.Filled.Sort,
+                    contentDescription = "Sort",
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.size(22.dp)
                 )
@@ -387,338 +672,46 @@ private fun LibraryTopBar(
 }
 
 @Composable
-private fun AllSection(
-    playlists: List<com.crank.music.domain.model.Playlist>,
-    smartPlaylists: List<SmartPlaylist>,
-    songs: List<Song>,
-    isGridView: Boolean,
-    isMultiSelectMode: Boolean,
-    selectedItems: Set<String>,
-    onCreatePlaylist: () -> Unit,
-    onPlaylistClick: (String) -> Unit,
-    onSmartPlaylistClick: (String) -> Unit,
-    onSongSelect: (Song) -> Unit,
-    onToggleSelect: (String) -> Unit,
-    onSeeAllPlaylists: () -> Unit,
-    onSeeAllSongs: () -> Unit,
-    onFindMusic: () -> Unit
+private fun YtFilterChips(
+    selected: LibrarySection,
+    onSelect: (LibrarySection) -> Unit,
 ) {
-    if (playlists.isEmpty() && smartPlaylists.isEmpty() && songs.isEmpty()) {
-        EmptyState(
-            title = "Your Library Is Empty",
-            subtitle = "Songs you like and playlists you create will appear here",
-            ctaText = "Find Music",
-            onCtaClick = onFindMusic
-        )
-        return
-    }
-
-    LazyColumn(
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(bottom = 120.dp)
+    LazyRow(
+        contentPadding = PaddingValues(horizontal = 16.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        if (playlists.isNotEmpty()) {
-            item {
-                SectionHeader("Playlists", "See All", onClick = onSeeAllPlaylists)
-            }
-            item {
-                LazyRow(
-                    contentPadding = PaddingValues(horizontal = 20.dp),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    item {
-                        CreatePlaylistCard(onClick = onCreatePlaylist)
-                    }
-                    items(playlists.take(5)) { playlist ->
-                        LibraryPlaylistMiniCard(
-                            playlist = playlist,
-                            onClick = { onPlaylistClick(playlist.id) }
-                        )
-                    }
-                }
-            }
-        }
-
-        if (smartPlaylists.isNotEmpty()) {
-            item {
-                Spacer(modifier = Modifier.height(24.dp))
-                SectionHeader("Smart Playlists", null, onClick = {})
-            }
-            item {
-                LazyRow(
-                    contentPadding = PaddingValues(horizontal = 20.dp),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    items(smartPlaylists) { smart ->
-                        SmartPlaylistCard(
-                            smartPlaylist = smart,
-                            onClick = { onSmartPlaylistClick(smart.id) }
-                        )
-                    }
-                }
-            }
-        }
-
-        if (songs.isNotEmpty()) {
-            item {
-                Spacer(modifier = Modifier.height(24.dp))
-                SectionHeader("All Songs", "${songs.size} songs", onClick = onSeeAllSongs)
-            }
-            items(songs.take(6)) { song ->
-                SongRow(
-                    song = song,
-                    isSelected = song.id in selectedItems,
-                    isMultiSelectMode = isMultiSelectMode,
-                    onClick = {
-                        if (isMultiSelectMode) onToggleSelect(song.id) else onSongSelect(song)
-                    },
-                    onToggleSelect = { onToggleSelect(song.id) }
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun PlaylistsSection(
-    playlists: List<com.crank.music.domain.model.Playlist>,
-    smartPlaylists: List<SmartPlaylist>,
-    isGridView: Boolean,
-    onCreateNew: () -> Unit,
-    onPlaylistClick: (String) -> Unit,
-    onSmartPlaylistClick: (String) -> Unit
-) {
-    LazyColumn(
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(bottom = 120.dp)
-    ) {
-        item {
-            Spacer(modifier = Modifier.height(8.dp))
-        }
-
-        item {
-            CreatePlaylistCard(onClick = onCreateNew)
-        }
-
-        if (smartPlaylists.isNotEmpty()) {
-            item {
-                Spacer(modifier = Modifier.height(20.dp))
-                SectionHeader("Smart Playlists", null, onClick = {})
-            }
-            items(smartPlaylists) { smart ->
-                SmartPlaylistCard(smartPlaylist = smart, onClick = { onSmartPlaylistClick(smart.id) })
-            }
-        }
-
-        item {
-            Spacer(modifier = Modifier.height(20.dp))
-            SectionHeader("Your Playlists", "${playlists.size}", onClick = {})
-        }
-
-        if (isGridView) {
-            item {
-                LazyVerticalGrid(
-                    columns = GridCells.Fixed(2),
-                    contentPadding = PaddingValues(horizontal = 20.dp),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                    modifier = Modifier.height(((playlists.size / 2 + playlists.size % 2) * 220).dp)
-                ) {
-                    items(playlists) { playlist ->
-                        PlaylistGridCard(
-                            playlist = playlist,
-                            onClick = { onPlaylistClick(playlist.id) }
-                        )
-                    }
-                }
-            }
-        } else {
-            items(playlists) { playlist ->
-                com.crank.music.ui.components.PlaylistCard(
-                    playlist = playlist,
-                    onClick = { onPlaylistClick(playlist.id) }
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun ArtistsSection(
-    artists: List<ArtistItem>,
-    onArtistClick: (String) -> Unit
-) {
-    val grouped = artists.groupBy { it.letter }
-
-    LazyColumn(
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(bottom = 120.dp)
-    ) {
-        grouped.forEach { (letter, letterArtists) ->
-            item {
-                Text(
-                    text = "$letter",
-                    style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp)
-                )
-            }
-            items(letterArtists) { artist ->
-                ArtistRow(
-                    artist = artist,
-                    onClick = { onArtistClick(artist.id) }
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun AlbumsSection(
-    albums: List<AlbumItem>,
-    onAlbumClick: (AlbumItem) -> Unit
-) {
-    LazyVerticalGrid(
-        columns = GridCells.Fixed(2),
-        contentPadding = PaddingValues(20.dp),
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
-    ) {
-        items(albums) { album ->
-            AlbumGridCard(
-                album = album,
-                onClick = { onAlbumClick(album) }
-            )
-        }
-    }
-}
-
-@Composable
-private fun SongsSection(
-    songs: List<Song>,
-    isGridView: Boolean,
-    isMultiSelectMode: Boolean,
-    selectedItems: Set<String>,
-    onSongSelect: (Song) -> Unit,
-    onToggleSelect: (String) -> Unit
-) {
-    LazyColumn(
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(bottom = 120.dp)
-    ) {
-        items(songs) { song ->
-            SongRow(
-                song = song,
-                isSelected = song.id in selectedItems,
-                isMultiSelectMode = isMultiSelectMode,
-                onClick = {
-                    if (isMultiSelectMode) onToggleSelect(song.id) else onSongSelect(song)
+        items(YT_FILTER_ORDER, key = { it.first.slug }) { (section, label) ->
+            val isSelected = section == selected
+            val bgColor by animateColorAsState(
+                targetValue = if (isSelected) {
+                    MaterialTheme.colorScheme.onBackground
+                } else {
+                    MaterialTheme.colorScheme.surfaceVariant
                 },
-                onToggleSelect = { onToggleSelect(song.id) }
+                animationSpec = tween(200),
+                label = "chip_bg"
             )
-        }
-    }
-}
-
-@Composable
-private fun DownloadedSection(
-    songs: List<Song>,
-    onSongSelect: (Song) -> Unit,
-    onFindMusic: () -> Unit
-) {
-    if (songs.isEmpty()) {
-        EmptyState(
-            title = "No Downloaded Songs",
-            subtitle = "Songs you download will appear here for offline listening",
-            ctaText = "Find Music",
-            onCtaClick = onFindMusic
-        )
-    } else {
-        LazyColumn(
-            modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(bottom = 120.dp)
-        ) {
-            item {
-                Text(
-                    text = "${songs.size} songs downloaded",
-                    style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp)
-                )
-            }
-            items(songs) { song ->
-                SongRow(song = song, onClick = { onSongSelect(song) })
-            }
-        }
-    }
-}
-
-@Composable
-private fun RecentlyAddedSection(
-    songs: List<Song>,
-    onSongSelect: (Song) -> Unit,
-    onFindMusic: () -> Unit
-) {
-    if (songs.isEmpty()) {
-        EmptyState(
-            title = "Nothing Recently Added",
-            subtitle = "Songs you add to your library will appear here",
-            ctaText = "Find Music",
-            onCtaClick = onFindMusic
-        )
-    } else {
-        LazyColumn(
-            modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(bottom = 120.dp)
-        ) {
-            items(songs) { song ->
-                SongRow(song = song, onClick = { onSongSelect(song) })
-            }
-        }
-    }
-}
-
-@Composable
-private fun CreatePlaylistCard(onClick: () -> Unit) {
-    Surface(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(70.dp)
-            .clip(RoundedCornerShape(12.dp))
-            .clickable { onClick() },
-        color = MaterialTheme.colorScheme.surfaceVariant,
-        shape = RoundedCornerShape(12.dp),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.3f))
-    ) {
-        Row(
-            modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Surface(
-                modifier = Modifier.size(50.dp),
-                shape = RoundedCornerShape(8.dp),
-                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
+            val textColor by animateColorAsState(
+                targetValue = if (isSelected) {
+                    MaterialTheme.colorScheme.background
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                },
+                animationSpec = tween(200),
+                label = "chip_text"
+            )
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(bgColor)
+                    .clickable { onSelect(section) }
+                    .padding(horizontal = 14.dp, vertical = 8.dp),
+                contentAlignment = Alignment.Center
             ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Icon(
-                        imageVector = Icons.Default.Add,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(26.dp)
-                    )
-                }
-            }
-            Spacer(modifier = Modifier.width(14.dp))
-            Column {
                 Text(
-                    text = "Create Playlist",
-                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                    color = MaterialTheme.colorScheme.onBackground
-                )
-                Text(
-                    text = "Build your own collection",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    text = label,
+                    style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Medium),
+                    color = textColor
                 )
             }
         }
@@ -726,269 +719,259 @@ private fun CreatePlaylistCard(onClick: () -> Unit) {
 }
 
 @Composable
-private fun LibraryPlaylistMiniCard(
-    playlist: com.crank.music.domain.model.Playlist,
-    onClick: () -> Unit
+private fun YtListSubheader(title: String) {
+    Text(
+        text = title,
+        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+        color = MaterialTheme.colorScheme.onBackground,
+        modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp)
+    )
+}
+
+/** Shared 56dp artwork tile: square 8dp radius, or circular for artists. */
+@Composable
+private fun YtArtwork(
+    url: String,
+    contentDescription: String?,
+    circular: Boolean = false,
+    modifier: Modifier = Modifier,
 ) {
-    Column(
-        modifier = Modifier
-            .width(140.dp)
-            .clickable { onClick() }
+    Surface(
+        modifier = modifier.size(56.dp),
+        shape = if (circular) CircleShape else RoundedCornerShape(8.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        tonalElevation = 1.dp
     ) {
-        Surface(
-            modifier = Modifier
-                .size(140.dp),
-            shape = RoundedCornerShape(12.dp),
-            color = MaterialTheme.colorScheme.surfaceVariant
-        ) {
-            Box {
+        Box(contentAlignment = Alignment.Center) {
+            if (url.isNotBlank()) {
                 AsyncImage(
-                    model = playlist.artworkUrl,
-                    contentDescription = playlist.title,
+                    model = url,
+                    contentDescription = contentDescription,
                     contentScale = ContentScale.Crop,
                     modifier = Modifier.fillMaxSize()
                 )
-            }
-        }
-        Spacer(modifier = Modifier.height(6.dp))
-        Text(
-            text = playlist.title,
-            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
-            color = MaterialTheme.colorScheme.onBackground,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis
-        )
-        Text(
-            text = "${playlist.songCount} songs",
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-    }
-}
-
-@Composable
-private fun PlaylistGridCard(
-    playlist: com.crank.music.domain.model.Playlist,
-    onClick: () -> Unit
-) {
-    Column(
-        modifier = Modifier
-            .clip(RoundedCornerShape(12.dp))
-            .clickable { onClick() }
-    ) {
-        Surface(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(160.dp),
-            shape = RoundedCornerShape(12.dp),
-            color = MaterialTheme.colorScheme.surfaceVariant
-        ) {
-            Box {
-                AsyncImage(
-                    model = playlist.artworkUrl,
-                    contentDescription = playlist.title,
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize()
+            } else {
+                Icon(
+                    imageVector = Icons.Default.MusicNote,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(24.dp)
                 )
             }
-        }
-        Spacer(modifier = Modifier.height(6.dp))
-        Text(
-            text = playlist.title,
-            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
-            color = MaterialTheme.colorScheme.onBackground,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis
-        )
-        Text(
-            text = "${playlist.songCount} songs",
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-    }
-}
-
-@Composable
-private fun SmartPlaylistCard(
-    smartPlaylist: SmartPlaylist,
-    onClick: () -> Unit
-) {
-    Surface(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(80.dp)
-            .clip(RoundedCornerShape(12.dp))
-            .clickable { onClick() },
-        color = MaterialTheme.colorScheme.surfaceVariant,
-        shape = RoundedCornerShape(12.dp)
-    ) {
-        Row(
-            modifier = Modifier.fillMaxSize().padding(12.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Surface(
-                modifier = Modifier.size(56.dp),
-                shape = RoundedCornerShape(8.dp),
-                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)
-            ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Text(
-                        text = when (smartPlaylist.icon) {
-                            "play" -> "\u25B6"
-                            "clock" -> "\u23F0"
-                            "star" -> "\u2605"
-                            else -> "\u266B"
-                        },
-                        fontSize = 24.sp
-                    )
-                }
-            }
-            Spacer(modifier = Modifier.width(12.dp))
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = smartPlaylist.title,
-                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
-                    color = MaterialTheme.colorScheme.onBackground,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-                Text(
-                    text = smartPlaylist.description,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-            }
-            Text(
-                text = "${smartPlaylist.songCount}",
-                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                color = MaterialTheme.colorScheme.primary
-            )
         }
     }
 }
 
 @Composable
-private fun ArtistRow(
-    artist: ArtistItem,
-    onClick: () -> Unit
+private fun YtPinnedRow(
+    icon: ImageVector,
+    iconTint: Color,
+    tileColor: Color,
+    title: String,
+    subtitle: String,
+    onClick: () -> Unit,
 ) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 20.dp, vertical = 4.dp)
-            .clip(RoundedCornerShape(8.dp))
             .clickable { onClick() }
-            .padding(8.dp),
+            .padding(horizontal = 16.dp, vertical = 7.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Surface(
-            modifier = Modifier.size(48.dp),
-            shape = CircleShape,
-            color = MaterialTheme.colorScheme.surfaceVariant
+            modifier = Modifier.size(56.dp),
+            shape = RoundedCornerShape(8.dp),
+            color = tileColor,
+            tonalElevation = 1.dp
         ) {
-            AsyncImage(
-                model = artist.artworkUrl,
-                contentDescription = artist.name,
-                modifier = Modifier.fillMaxSize()
-            )
+            Box(contentAlignment = Alignment.Center) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    tint = iconTint,
+                    modifier = Modifier.size(26.dp)
+                )
+            }
         }
         Spacer(modifier = Modifier.width(12.dp))
         Column(modifier = Modifier.weight(1f)) {
             Text(
-                text = artist.name,
-                style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Medium),
-                color = MaterialTheme.colorScheme.onBackground
+                text = title,
+                style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Bold),
+                color = MaterialTheme.colorScheme.onBackground,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
             )
             Text(
-                text = "${artist.songCount} songs",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+                text = subtitle,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
             )
         }
     }
 }
 
 @Composable
-private fun AlbumGridCard(
-    album: AlbumItem,
-    onClick: () -> Unit
-) {
-    Column(
+private fun YtNewPlaylistRow(onClick: () -> Unit) {
+    Row(
         modifier = Modifier
-            .clip(RoundedCornerShape(12.dp))
+            .fillMaxWidth()
             .clickable { onClick() }
+            .padding(horizontal = 16.dp, vertical = 7.dp),
+        verticalAlignment = Alignment.CenterVertically
     ) {
         Surface(
-            modifier = Modifier
-                .fillMaxWidth()
-                .aspectRatio(1f),
-            shape = RoundedCornerShape(12.dp),
-            color = MaterialTheme.colorScheme.surfaceVariant
+            modifier = Modifier.size(56.dp),
+            shape = RoundedCornerShape(8.dp),
+            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
         ) {
-            Box {
-                AsyncImage(
-                    model = album.artworkUrl,
-                    contentDescription = album.title,
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize()
+            Box(contentAlignment = Alignment.Center) {
+                Icon(
+                    imageVector = Icons.Default.Add,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(26.dp)
                 )
-                Surface(
-                    modifier = Modifier
-                        .align(Alignment.TopEnd)
-                        .padding(6.dp),
-                    color = MaterialTheme.colorScheme.background.copy(alpha = 0.7f),
-                    shape = RoundedCornerShape(4.dp)
-                ) {
-                    Text(
-                        text = album.year,
-                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                        color = MaterialTheme.colorScheme.onBackground,
-                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+            }
+        }
+        Spacer(modifier = Modifier.width(12.dp))
+        Text(
+            text = "New playlist",
+            style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Bold),
+            color = MaterialTheme.colorScheme.primary,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+    }
+}
+
+@Composable
+private fun YtPlaylistRow(
+    playlist: Playlist,
+    onClick: () -> Unit,
+    onMenuClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onClick() }
+            .padding(horizontal = 16.dp, vertical = 7.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        YtArtwork(
+            url = playlist.artworkUrl,
+            contentDescription = playlist.title
+        )
+        Spacer(modifier = Modifier.width(12.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = playlist.title,
+                style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Bold),
+                color = MaterialTheme.colorScheme.onBackground,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Text(
+                text = "Playlist • ${countSongs(playlist.songCount)}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+        IconButton(onClick = onMenuClick) {
+            Icon(
+                imageVector = Icons.Default.MoreVert,
+                contentDescription = "Options",
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(20.dp)
+            )
+        }
+    }
+}
+
+@Composable
+private fun YtSmartPlaylistRow(
+    smart: SmartPlaylist,
+    onClick: () -> Unit,
+    onMenuClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onClick() }
+            .padding(horizontal = 16.dp, vertical = 7.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        if (smart.artworkUrl.isNotBlank()) {
+            YtArtwork(url = smart.artworkUrl, contentDescription = smart.title)
+        } else {
+            Surface(
+                modifier = Modifier.size(56.dp),
+                shape = RoundedCornerShape(8.dp),
+                color = MaterialTheme.colorScheme.surfaceVariant
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        imageVector = when (smart.icon) {
+                            "play" -> Icons.Default.PlayArrow
+                            "clock" -> Icons.Default.History
+                            "star" -> Icons.Default.ThumbUp
+                            else -> Icons.Default.MusicNote
+                        },
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(26.dp)
                     )
                 }
             }
         }
-        Spacer(modifier = Modifier.height(6.dp))
-        Text(
-            text = album.title,
-            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
-            color = MaterialTheme.colorScheme.onBackground,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis
-        )
-        Text(
-            text = album.artistName,
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis
-        )
+        Spacer(modifier = Modifier.width(12.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = smart.title,
+                style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Bold),
+                color = MaterialTheme.colorScheme.onBackground,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Text(
+                text = "Playlist • ${countSongs(smart.songCount)}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+        IconButton(onClick = onMenuClick) {
+            Icon(
+                imageVector = Icons.Default.MoreVert,
+                contentDescription = "Options",
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(20.dp)
+            )
+        }
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun SongRow(
+private fun YtSongRow(
     song: Song,
     isSelected: Boolean = false,
     isMultiSelectMode: Boolean = false,
     onClick: () -> Unit,
-    onToggleSelect: (() -> Unit)? = null
+    onLongClick: (() -> Unit)? = null,
+    onToggleSelect: (() -> Unit)? = null,
+    onMenuClick: () -> Unit,
 ) {
-    val bgColor by animateColorAsState(
-        targetValue = if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.1f) else Color.Transparent,
-        animationSpec = tween(200), label = "bg"
-    )
-
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .background(bgColor)
-            .padding(horizontal = 20.dp, vertical = 6.dp)
-            .clip(RoundedCornerShape(10.dp))
-            .clickable { onClick() }
-            .padding(8.dp),
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick)
+            .padding(horizontal = 16.dp, vertical = 7.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         if (isMultiSelectMode) {
@@ -1002,9 +985,19 @@ private fun SongRow(
                     .size(24.dp)
                     .scale(checkScale)
                     .clip(RoundedCornerShape(4.dp))
-                    .background(if (isSelected) MaterialTheme.colorScheme.primary else Color.Transparent)
+                    .background(
+                        if (isSelected) MaterialTheme.colorScheme.primary else Color.Transparent
+                    )
                     .then(
-                        if (!isSelected) Modifier.border(1.5.dp, MaterialTheme.colorScheme.onSurfaceVariant, RoundedCornerShape(4.dp)) else Modifier
+                        if (!isSelected) {
+                            Modifier.border(
+                                1.5.dp,
+                                MaterialTheme.colorScheme.onSurfaceVariant,
+                                RoundedCornerShape(4.dp)
+                            )
+                        } else {
+                            Modifier
+                        }
                     )
                     .clickable { onToggleSelect?.invoke() },
                 contentAlignment = Alignment.Center
@@ -1020,45 +1013,455 @@ private fun SongRow(
             }
             Spacer(modifier = Modifier.width(12.dp))
         }
-
-        Surface(
-            modifier = Modifier.size(48.dp),
-            shape = RoundedCornerShape(8.dp),
-            color = MaterialTheme.colorScheme.surfaceVariant
-        ) {
-            AsyncImage(
-                model = song.artworkUrl,
-                contentDescription = null,
-                modifier = Modifier.fillMaxSize()
-            )
-        }
-
+        YtArtwork(url = song.artworkUrl, contentDescription = song.title)
         Spacer(modifier = Modifier.width(12.dp))
-
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = song.title,
-                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
+                style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Bold),
                 color = MaterialTheme.colorScheme.onBackground,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
             Text(
                 text = song.artistName,
-                style = MaterialTheme.typography.labelSmall,
+                style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
         }
-
-        Text(
-            text = formatDuration(song.durationMs),
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
+        if (!isMultiSelectMode) {
+            IconButton(onClick = onMenuClick) {
+                Icon(
+                    imageVector = Icons.Default.MoreVert,
+                    contentDescription = "Options",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+        }
     }
 }
+
+@Composable
+private fun YtAlbumRow(
+    album: AlbumItem,
+    onClick: () -> Unit,
+    onMenuClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onClick() }
+            .padding(horizontal = 16.dp, vertical = 7.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        YtArtwork(url = album.artworkUrl, contentDescription = album.title)
+        Spacer(modifier = Modifier.width(12.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = album.title,
+                style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Bold),
+                color = MaterialTheme.colorScheme.onBackground,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Text(
+                text = "Album • ${album.artistName}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+        IconButton(onClick = onMenuClick) {
+            Icon(
+                imageVector = Icons.Default.MoreVert,
+                contentDescription = "Options",
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(20.dp)
+            )
+        }
+    }
+}
+
+@Composable
+private fun YtArtistRow(
+    artist: ArtistItem,
+    onClick: () -> Unit,
+    onMenuClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onClick() }
+            .padding(horizontal = 16.dp, vertical = 7.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        YtArtwork(
+            url = artist.artworkUrl,
+            contentDescription = artist.name,
+            circular = true
+        )
+        Spacer(modifier = Modifier.width(12.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = artist.name,
+                style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Bold),
+                color = MaterialTheme.colorScheme.onBackground,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Text(
+                text = "Artist • ${countSongs(artist.songCount)}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+        IconButton(onClick = onMenuClick) {
+            Icon(
+                imageVector = Icons.Default.MoreVert,
+                contentDescription = "Options",
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(20.dp)
+            )
+        }
+    }
+}
+
+@Composable
+private fun YtEmptyState(
+    icon: ImageVector,
+    title: String,
+    message: String,
+    ctaText: String,
+    onCtaClick: () -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 32.dp, vertical = 48.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Surface(
+            modifier = Modifier.size(72.dp),
+            shape = CircleShape,
+            color = MaterialTheme.colorScheme.surfaceVariant
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(32.dp)
+                )
+            }
+        }
+        Spacer(modifier = Modifier.height(16.dp))
+        Text(
+            text = title,
+            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+            color = MaterialTheme.colorScheme.onBackground,
+            textAlign = TextAlign.Center
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(
+            text = message,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center
+        )
+        Spacer(modifier = Modifier.height(20.dp))
+        Surface(
+            modifier = Modifier
+                .clip(RoundedCornerShape(20.dp))
+                .clickable { onCtaClick() },
+            color = MaterialTheme.colorScheme.onBackground,
+            shape = RoundedCornerShape(20.dp)
+        ) {
+            Text(
+                text = ctaText,
+                style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
+                color = MaterialTheme.colorScheme.background,
+                modifier = Modifier.padding(horizontal = 24.dp, vertical = 10.dp)
+            )
+        }
+    }
+}
+
+@Composable
+private fun YtLoadingRows(count: Int = 8) {
+    Column(modifier = Modifier.fillMaxWidth()) {
+        repeat(count) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 7.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                ShimmerBox(
+                    modifier = Modifier
+                        .size(56.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                )
+                Spacer(modifier = Modifier.width(12.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    ShimmerBox(
+                        modifier = Modifier
+                            .fillMaxWidth(0.6f)
+                            .height(14.dp)
+                            .clip(RoundedCornerShape(4.dp))
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                    ShimmerBox(
+                        modifier = Modifier
+                            .fillMaxWidth(0.4f)
+                            .height(12.dp)
+                            .clip(RoundedCornerShape(4.dp))
+                    )
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun YtSortSheet(
+    currentSort: String,
+    onSortSelect: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val sheetState = rememberModalBottomSheetState()
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = MaterialTheme.colorScheme.background,
+        dragHandle = {
+            Box(
+                modifier = Modifier
+                    .padding(vertical = 12.dp)
+                    .width(40.dp)
+                    .height(4.dp)
+                    .background(MaterialTheme.colorScheme.onSurfaceVariant, RoundedCornerShape(2.dp))
+            )
+        }
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 8.dp)
+        ) {
+            Text(
+                text = "Sort by",
+                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                color = MaterialTheme.colorScheme.onBackground,
+                modifier = Modifier.padding(horizontal = 8.dp, vertical = 8.dp)
+            )
+            YT_SORT_OPTIONS.forEach { (value, label) ->
+                val isSelected = value == currentSort
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable { onSortSelect(value) }
+                        .padding(horizontal = 8.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = label,
+                        style = MaterialTheme.typography.bodyLarge.copy(
+                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+                        ),
+                        color = if (isSelected) {
+                            MaterialTheme.colorScheme.primary
+                        } else {
+                            MaterialTheme.colorScheme.onBackground
+                        },
+                        modifier = Modifier.weight(1f)
+                    )
+                    if (isSelected) {
+                        Icon(
+                            imageVector = Icons.Default.Check,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                }
+            }
+            Spacer(modifier = Modifier.height(24.dp))
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun YtOptionsSheet(
+    target: LibraryOptionsTarget,
+    onPlaySong: (Song) -> Unit,
+    onOpenPlaylist: (String) -> Unit,
+    onOpenSmart: (String) -> Unit,
+    onOpenArtist: (String) -> Unit,
+    onOpenAlbum: (Album) -> Unit,
+    onDeletePlaylist: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val sheetState = rememberModalBottomSheetState()
+
+    val headerArtwork: String
+    val headerTitle: String
+    val headerSubtitle: String
+    val actions: List<YtOptionAction>
+    when (target) {
+        is LibraryOptionsTarget.SongItem -> {
+            headerArtwork = target.song.artworkUrl
+            headerTitle = target.song.title
+            headerSubtitle = target.song.artistName
+            actions = listOf(
+                YtOptionAction(Icons.Default.PlayArrow, "Play") {
+                    onPlaySong(target.song)
+                },
+                YtOptionAction(Icons.Default.Person, "Go to artist") {
+                    onOpenArtist(target.song.artistName)
+                },
+                YtOptionAction(Icons.Default.Album, "Go to album") {
+                    onOpenAlbum(albumForSong(target.song))
+                },
+            )
+        }
+        is LibraryOptionsTarget.UserPlaylist -> {
+            headerArtwork = target.playlist.artworkUrl
+            headerTitle = target.playlist.title
+            headerSubtitle = "Playlist • ${countSongs(target.playlist.songCount)}"
+            actions = listOf(
+                YtOptionAction(Icons.Default.FolderOpen, "Open") {
+                    onOpenPlaylist(target.playlist.id)
+                },
+                YtOptionAction(Icons.Default.Delete, "Delete", isDestructive = true) {
+                    onDeletePlaylist(target.playlist.id)
+                },
+            )
+        }
+        is LibraryOptionsTarget.SmartRow -> {
+            headerArtwork = target.smart.artworkUrl
+            headerTitle = target.smart.title
+            headerSubtitle = "Playlist • ${countSongs(target.smart.songCount)}"
+            actions = listOf(
+                YtOptionAction(Icons.Default.FolderOpen, "Open") {
+                    onOpenSmart(target.smart.id)
+                },
+            )
+        }
+        is LibraryOptionsTarget.ArtistRowItem -> {
+            headerArtwork = target.artist.artworkUrl
+            headerTitle = target.artist.name
+            headerSubtitle = "Artist • ${countSongs(target.artist.songCount)}"
+            actions = listOf(
+                YtOptionAction(Icons.Default.Person, "Open artist") {
+                    onOpenArtist(target.artist.id)
+                },
+            )
+        }
+        is LibraryOptionsTarget.AlbumRowItem -> {
+            headerArtwork = target.album.artworkUrl
+            headerTitle = target.album.title
+            headerSubtitle = "Album • ${target.album.artistName}"
+            actions = listOf(
+                YtOptionAction(Icons.Default.Album, "Open album") {
+                    onOpenAlbum(target.album.toDomainModel())
+                },
+            )
+        }
+    }
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = MaterialTheme.colorScheme.background,
+        dragHandle = {
+            Box(
+                modifier = Modifier
+                    .padding(vertical = 12.dp)
+                    .width(40.dp)
+                    .height(4.dp)
+                    .background(MaterialTheme.colorScheme.onSurfaceVariant, RoundedCornerShape(2.dp))
+            )
+        }
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 8.dp)
+        ) {
+            Row(
+                modifier = Modifier.padding(horizontal = 8.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                YtArtwork(url = headerArtwork, contentDescription = headerTitle)
+                Spacer(modifier = Modifier.width(12.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = headerTitle,
+                        style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Bold),
+                        color = MaterialTheme.colorScheme.onBackground,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        text = headerSubtitle,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+            actions.forEach { action ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable { action.onClick() }
+                        .padding(horizontal = 8.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = action.icon,
+                        contentDescription = null,
+                        tint = if (action.isDestructive) {
+                            MaterialTheme.colorScheme.error
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                        modifier = Modifier.size(22.dp)
+                    )
+                    Spacer(modifier = Modifier.width(16.dp))
+                    Text(
+                        text = action.label,
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = if (action.isDestructive) {
+                            MaterialTheme.colorScheme.error
+                        } else {
+                            MaterialTheme.colorScheme.onBackground
+                        }
+                    )
+                }
+            }
+            Spacer(modifier = Modifier.height(24.dp))
+        }
+    }
+}
+
+private data class YtOptionAction(
+    val icon: ImageVector,
+    val label: String,
+    val isDestructive: Boolean = false,
+    val onClick: () -> Unit,
+)
 
 @Composable
 private fun MultiSelectBar(
@@ -1082,7 +1485,7 @@ private fun MultiSelectBar(
             horizontalArrangement = Arrangement.SpaceEvenly
         ) {
             MultiSelectAction(icon = Icons.Default.Check, label = "All", onClick = onSelectAll)
-            MultiSelectAction(icon = Icons.Default.ViewModule, label = "Download", onClick = onDownload)
+            MultiSelectAction(icon = Icons.Default.Download, label = "Download", onClick = onDownload)
             MultiSelectAction(icon = Icons.Default.Delete, label = "Delete", onClick = onDelete)
         }
     }
@@ -1090,7 +1493,7 @@ private fun MultiSelectBar(
 
 @Composable
 private fun MultiSelectAction(
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    icon: ImageVector,
     label: String,
     onClick: () -> Unit
 ) {
@@ -1311,208 +1714,4 @@ private fun CreatePlaylistModal(
             Spacer(modifier = Modifier.height(24.dp))
         }
     }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun SortFilterModal(
-    currentSort: String,
-    currentFilter: String,
-    onSortSelect: (String) -> Unit,
-    onFilterSelect: (String) -> Unit,
-    onDismiss: () -> Unit
-) {
-    val sheetState = rememberModalBottomSheetState()
-    val sortOptions = listOf("Name", "Artist", "Album", "Date Added", "Play Count", "Duration")
-    val filterOptions = listOf("None", "Downloaded", "Explicit", "Released this year")
-
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        sheetState = sheetState,
-        containerColor = MaterialTheme.colorScheme.background,
-        dragHandle = {
-            Box(
-                modifier = Modifier
-                    .padding(vertical = 12.dp)
-                    .width(40.dp)
-                    .height(4.dp)
-                    .background(MaterialTheme.colorScheme.primary, shape = RoundedCornerShape(2.dp))
-            )
-        }
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 24.dp, vertical = 16.dp)
-        ) {
-            Text(
-                text = "Sort & Filter",
-                style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.Bold),
-                color = MaterialTheme.colorScheme.onBackground,
-                modifier = Modifier.padding(bottom = 20.dp)
-            )
-
-            Text(
-                text = "SORT BY",
-                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(bottom = 8.dp)
-            )
-
-            LazyRow(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                modifier = Modifier.padding(bottom = 20.dp)
-            ) {
-                items(sortOptions) { option ->
-                    val isSelected = option == currentSort
-                    Surface(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(20.dp))
-                            .clickable { onSortSelect(option) },
-                        color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
-                        shape = RoundedCornerShape(20.dp)
-                    ) {
-                        Text(
-                            text = option,
-                            style = MaterialTheme.typography.labelLarge.copy(
-                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
-                            ),
-                            color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp)
-                        )
-                    }
-                }
-            }
-
-            Text(
-                text = "FILTER BY",
-                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(bottom = 8.dp)
-            )
-
-            LazyRow(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                modifier = Modifier.padding(bottom = 24.dp)
-            ) {
-                items(filterOptions) { option ->
-                    val isSelected = option == currentFilter
-                    Surface(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(20.dp))
-                            .clickable { onFilterSelect(option) },
-                        color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
-                        shape = RoundedCornerShape(20.dp)
-                    ) {
-                        Text(
-                            text = option,
-                            style = MaterialTheme.typography.labelLarge.copy(
-                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
-                            ),
-                            color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp)
-                        )
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun EmptyState(
-    title: String,
-    subtitle: String,
-    ctaText: String,
-    onCtaClick: () -> Unit
-) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(48.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        Text(
-            text = "\uD83C\uDFB5",
-            fontSize = 64.sp,
-            modifier = Modifier.padding(bottom = 16.dp)
-        )
-        Text(
-            text = title,
-            style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold),
-            color = MaterialTheme.colorScheme.onBackground,
-            textAlign = TextAlign.Center
-        )
-        Spacer(modifier = Modifier.height(8.dp))
-        Text(
-            text = subtitle,
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            textAlign = TextAlign.Center
-        )
-        Spacer(modifier = Modifier.height(24.dp))
-        Surface(
-            modifier = Modifier
-                .clip(RoundedCornerShape(25.dp))
-                .clickable { onCtaClick() },
-            color = MaterialTheme.colorScheme.primary,
-            shape = RoundedCornerShape(25.dp)
-        ) {
-            Text(
-                text = ctaText,
-                style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
-                color = MaterialTheme.colorScheme.onPrimary,
-                modifier = Modifier.padding(horizontal = 24.dp, vertical = 12.dp)
-            )
-        }
-    }
-}
-
-@Composable
-private fun SectionHeader(
-    title: String,
-    subtitle: String?,
-    onClick: () -> Unit
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 20.dp, vertical = 8.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                text = title,
-                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
-                color = MaterialTheme.colorScheme.onBackground
-            )
-            if (subtitle != null) {
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    text = subtitle,
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-        }
-        if (subtitle != null) {
-            Text(
-                text = "See All",
-                style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.primary,
-                modifier = Modifier
-                    .clip(RoundedCornerShape(8.dp))
-                    .clickable { onClick() }
-                    .padding(horizontal = 8.dp, vertical = 4.dp)
-            )
-        }
-    }
-}
-
-private fun formatDuration(ms: Long): String {
-    val totalSeconds = ms / 1000
-    val minutes = totalSeconds / 60
-    val seconds = totalSeconds % 60
-    return "$minutes:${seconds.toString().padStart(2, '0')}"
 }

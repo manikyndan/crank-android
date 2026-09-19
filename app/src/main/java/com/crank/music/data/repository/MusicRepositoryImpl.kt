@@ -34,6 +34,7 @@ class MusicRepositoryImpl @Inject constructor(
     // is strictly better than a blank screen, and is never fiction — it is a real result we fetched
     // earlier.
     private val searchCache = TtlCache<List<Song>>(ttlMillis = 2 * 60 * 1000L)
+    private val albumSearchCache = TtlCache<List<Album>>(ttlMillis = 2 * 60 * 1000L)
     private val homeCache = TtlCache<List<Album>>(ttlMillis = 10 * 60 * 1000L)
     private val browseCache = TtlCache<List<Song>>(ttlMillis = 30 * 60 * 1000L)
 
@@ -72,6 +73,36 @@ class MusicRepositoryImpl @Inject constructor(
         }.map { it.toDomainModel() }
 
         return filtered
+    }
+
+    override suspend fun searchAlbums(query: String): List<Album> {
+        if (query.isBlank()) return emptyList()
+        val key = "albums:$query"
+
+        // 1. Fresh cache hit.
+        albumSearchCache.get(key)?.let { return it }
+
+        // 2. Network, with retries. Same cancellation contract as [search].
+        val remoteResults = try {
+            retryWithBackoff(maxAttempts = 2) { remoteDataSource.searchAlbums(query) }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Log.e("CRANK_INTEGRATION", "Album search failed after retries: ${e.message}", e)
+            null
+        }
+
+        if (remoteResults != null) {
+            albumSearchCache.put(key, remoteResults)
+            return remoteResults
+        }
+
+        // 3. Stale cache rather than nothing.
+        albumSearchCache.get(key, allowStale = true)?.let { return it }
+
+        // 4. No local album index exists, so an honest empty answer — never a
+        //    synthesised "Single" card. The UI already renders an empty state.
+        return emptyList()
     }
 
     override suspend fun browseCollection(browseId: String): List<Song> {

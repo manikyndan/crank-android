@@ -245,6 +245,8 @@ fun MiniPlayer(
 ) {
     var dragOffset by remember { mutableStateOf(0f) }
 
+    // Elevated frosted bar with rounded top corners, floating just above the
+    // navigation bar. Signature unchanged, so MainScreen needs no edits.
     Surface(
         modifier = modifier
             .fillMaxWidth()
@@ -271,19 +273,19 @@ fun MiniPlayer(
                 )
             }
             .clickable { onPlayerClick() },
-        color = Color.Transparent,
-        shadowElevation = 0.dp
+        shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        tonalElevation = 3.dp,
+        shadowElevation = 8.dp
     ) {
         Column(modifier = Modifier.fillMaxWidth()) {
-            // Hairline progress. Deliberately thin and uncoloured: the mini-player already has a
-            // coloured control (the play button) and a coloured progress bar as well made the bar
-            // read as two competing actions. It is information, not a control.
+            // Thin progress hairline along the very top edge, accent-tinted.
             LinearProgressIndicator(
                 progress = { progress.coerceIn(0f, 1f) },
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(1.5.dp),
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.35f),
+                    .height(2.dp),
+                color = MaterialTheme.colorScheme.primary,
                 trackColor = Color.Transparent,
                 drawStopIndicator = {}
             )
@@ -291,23 +293,20 @@ fun MiniPlayer(
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(MaterialTheme.colorScheme.background)
                     .padding(horizontal = 12.dp, vertical = 8.dp)
             ) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    // No border. The artwork is the identity of the track, and a coloured ring
-                    // around it competes with whatever palette the cover actually has.
                     Surface(
-                        modifier = Modifier.size(44.dp),
-                        shape = RoundedCornerShape(6.dp),
-                        color = MaterialTheme.colorScheme.surfaceVariant
+                        modifier = Modifier.size(48.dp),
+                        shape = RoundedCornerShape(10.dp),
+                        color = MaterialTheme.colorScheme.background,
+                        tonalElevation = 1.dp,
+                        shadowElevation = 2.dp
                     ) {
                         Box(contentAlignment = Alignment.Center) {
-                            // Loading keeps the artwork slot so the row never reflows when the
-                            // cover arrives; a spinner replacing the box would shift the title.
                             if (artworkUrl.isNotBlank()) {
                                 AsyncImage(
                                     model = artworkUrl,
@@ -324,7 +323,7 @@ fun MiniPlayer(
                                     },
                                     contentDescription = null,
                                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.size(20.dp)
+                                    modifier = Modifier.size(22.dp)
                                 )
                             }
                         }
@@ -341,7 +340,8 @@ fun MiniPlayer(
                             color = MaterialTheme.colorScheme.onSurface,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
-                            fontSize = 14.sp
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold
                         )
                         val subtitle = when {
                             isLoading -> "Loading…"
@@ -364,14 +364,26 @@ fun MiniPlayer(
 
                     Spacer(modifier = Modifier.width(8.dp))
 
-                    // The one coloured element in the bar, so it reads as the primary action
-                    // without needing a label. Sized up from 36dp: it is the control people reach
-                    // for most and it sits at the very bottom of the screen.
+                    // Clearly tappable 44dp target: accent-tinted disc. The scale
+                    // spring fires on every tap because each tap flips isPlaying.
                     if (!isLoading) {
+                        val pressScale by animateFloatAsState(
+                            targetValue = if (isPlaying) 1f else 0.9f,
+                            animationSpec = spring(
+                                dampingRatio = Spring.DampingRatioMediumBouncy,
+                                stiffness = Spring.StiffnessMedium
+                            ),
+                            label = "mini_press"
+                        )
                         Surface(
-                            modifier = Modifier.size(40.dp),
+                            modifier = Modifier
+                                .size(44.dp)
+                                .graphicsLayer {
+                                    scaleX = pressScale
+                                    scaleY = pressScale
+                                },
                             shape = CircleShape,
-                            color = Color.Transparent,
+                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.14f),
                             onClick = onPlayPauseClick
                         ) {
                             Box(contentAlignment = Alignment.Center) {
@@ -379,7 +391,7 @@ fun MiniPlayer(
                                     imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
                                     contentDescription = if (isPlaying) "Pause" else "Play",
                                     tint = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.size(30.dp)
+                                    modifier = Modifier.size(26.dp)
                                 )
                             }
                         }

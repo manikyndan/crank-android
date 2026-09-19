@@ -72,6 +72,57 @@ class YouTubeRemoteDataSource @Inject constructor(
         }
     }
 
+    override suspend fun searchAlbums(query: String): List<Album> {
+        if (query.isBlank()) return emptyList()
+
+        return try {
+            val results = innerTubeApi.searchAlbums(query)
+            if (results.isNotEmpty()) {
+                results
+            } else {
+                searchAlbumsFallback(query)
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Log.e("CRANK_INTEGRATION", e.message ?: "InnerTube album search error, trying fallback", e)
+            searchAlbumsFallback(query)
+        }
+    }
+
+    private suspend fun searchAlbumsFallback(query: String): List<Album> {
+        return withContext(Dispatchers.IO) {
+            try {
+                val searchExtractor = ServiceList.YouTube.getSearchExtractor(
+                    query,
+                    listOf(YoutubeSearchQueryHandlerFactory.MUSIC_ALBUMS),
+                    ""
+                )
+                searchExtractor.fetchPage()
+
+                val items = searchExtractor.initialPage.items
+                items.filterIsInstance<PlaylistInfoItem>().map { item ->
+                    val browseId = item.url.substringAfter("list=").substringBefore("&")
+                    Album(
+                        id = browseId,
+                        title = item.name ?: "Unknown Album",
+                        artistName = item.uploaderName ?: "Unknown Artist",
+                        // The search extractor does not give us a release year.
+                        // Empty means "not known", never a stand-in.
+                        releaseYear = "",
+                        artworkUrl = ArtworkUrl.bestOf(item.thumbnails.map { it.url }),
+                        trackCount = item.streamCount.toInt()
+                    )
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.e("CRANK_INTEGRATION", e.message ?: "Fallback album search failed", e)
+                emptyList()
+            }
+        }
+    }
+
     override suspend fun getHomeData(): List<Album> {
         return try {
             val results = innerTubeApi.getHomeData()
