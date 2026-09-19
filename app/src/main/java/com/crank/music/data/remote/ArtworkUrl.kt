@@ -27,9 +27,19 @@ object ArtworkUrl {
      */
     private const val TARGET_PX = 1080
 
+    /**
+     * Matches the leading size token of a `googleusercontent` suffix.
+     *
+     * Both spellings occur and they are not interchangeable: album art uses `=w544-h544-l90-rj`
+     * while artist and channel art uses `=s192` / `=s1200`. Matching only `=w` makes every
+     * `=s`-style candidate score zero, and `maxByOrNull` then returns the *first* of them — the
+     * smallest — so a row offering 1200 px was served at 192 px.
+     */
+    private val GOOGLE_SIZE = Regex("""=[ws]\d+""")
+
     /** The width a thumbnail URL asks for. Used only to order candidates. */
     fun requestedWidthOf(url: String): Int =
-        Regex("""=w(\d+)""").find(url)?.groupValues?.get(1)?.toIntOrNull() ?: 0
+        GOOGLE_SIZE.find(url)?.value?.drop(2)?.toIntOrNull() ?: 0
 
     /**
      * Picks the widest of several offered thumbnails, then upgrades it.
@@ -86,18 +96,24 @@ object ArtworkUrl {
             .replace("100x100", "600x600")
 
     /**
-     * Rewrites a `googleusercontent` artwork URL to request [TARGET_PX].
+     * Rewrites a `googleusercontent` artwork URL to request [TARGET_PX], replacing whatever size
+     * suffix it carries.
      *
-     * The size lives in a suffix rather than a query parameter: `...=w544-h544-l90-rj`. Only the
-     * two numbers are replaced — the trailing flags are what ask for the cropped, re-encoded square
-     * the UI wants, so dropping them would change the framing.
+     * The size lives in a suffix rather than a query parameter, and it appears in several shapes:
+     * `=w544-h544-l90-rj` (album art), `=s192` (artist art), and `=w60-c-h60-k-c0x00ffffff`. A
+     * rule written against only the first shape leaves the other two at their original size, which
+     * is how rows offering 1200 px were served at 192 px and 60 px.
      *
-     * Returns the URL unchanged when it carries no size suffix, for the same reason as above.
+     * The trailing flags are dropped rather than preserved. That is measured, not assumed: across
+     * the three shapes, `=w1080-h1080` returns the same image as `=w1080-h1080-l90-rj`
+     * (1080x1080, 356811 vs 356930 bytes) and is the only form that works on the `=s` and
+     * `=w60-c-h60` URLs at all. Keeping them would mean three separate rules.
+     *
+     * Returns the URL unchanged when it carries no size suffix, because at that point there is
+     * nothing to raise and guessing a shape could distort the image.
      */
     private fun upgradeGoogle(url: String): String {
-        val size = Regex("""=w(\d+)-h(\d+)""").find(url) ?: return url
-        val flags = url.substring(size.range.last + 1)
-        return url.substring(0, size.range.first) +
-            "=w$TARGET_PX-h$TARGET_PX" + flags
+        val size = GOOGLE_SIZE.find(url) ?: return url
+        return url.substring(0, size.range.first) + "=w$TARGET_PX-h$TARGET_PX"
     }
 }

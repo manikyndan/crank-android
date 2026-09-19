@@ -24,17 +24,21 @@ class ArtworkUrlTest {
         val raised = ArtworkUrl.upgrade(
             "https://lh3.googleusercontent.com/abc123=w120-h120-l90-rj"
         )
-        assertEquals("https://lh3.googleusercontent.com/abc123=w1080-h1080-l90-rj", raised)
+        assertEquals("https://lh3.googleusercontent.com/abc123=w1080-h1080", raised)
     }
 
     @Test
-    fun raisingPreservesCroppingFlags() {
-        // `-l90-rj` is what asks for the cropped, re-encoded square the UI wants. Dropping it
-        // changes the framing, so only the two numbers may be replaced.
-        val raised = ArtworkUrl.upgrade(
-            "https://lh3.googleusercontent.com/abc=w544-h544-l90-rj"
-        )
-        assertEquals("https://lh3.googleusercontent.com/abc=w1080-h1080-l90-rj", raised)
+    fun raisingReplacesWhateverSuffixShapeItFinds() {
+        // Three shapes occur in the wild and the old rule matched only the first, leaving the
+        // other two at 192 px and 60 px.
+        for (suffix in listOf("=w544-h544-l90-rj", "=s192", "=w60-c-h60-k-c0x00ffffff")) {
+            val raised = ArtworkUrl.upgrade("https://lh3.googleusercontent.com/abc$suffix")
+            assertEquals(
+                "suffix $suffix was not raised",
+                "https://lh3.googleusercontent.com/abc=w1080-h1080",
+                raised
+            )
+        }
     }
 
     @Test
@@ -110,7 +114,7 @@ class ArtworkUrlTest {
     @Test
     fun protocolRelativeUrlGetsAScheme() {
         val raised = ArtworkUrl.upgrade("//lh3.googleusercontent.com/abc=w120-h120-l90-rj")
-        assertEquals("https://lh3.googleusercontent.com/abc=w1080-h1080-l90-rj", raised)
+        assertEquals("https://lh3.googleusercontent.com/abc=w1080-h1080", raised)
     }
 
     @Test
@@ -136,7 +140,7 @@ class ArtworkUrlTest {
                 "https://lh3.googleusercontent.com/a=w226-h226-l90-rj"
             )
         )
-        assertEquals("https://lh3.googleusercontent.com/a=w1080-h1080-l90-rj", picked)
+        assertEquals("https://lh3.googleusercontent.com/a=w1080-h1080", picked)
     }
 
     @Test
@@ -149,7 +153,7 @@ class ArtworkUrlTest {
                 "https://lh3.googleusercontent.com/a=w120-h120-l90-rj"
             )
         )
-        assertEquals("https://lh3.googleusercontent.com/a=w1080-h1080-l90-rj", picked)
+        assertEquals("https://lh3.googleusercontent.com/a=w1080-h1080", picked)
     }
 
     @Test
@@ -164,6 +168,33 @@ class ArtworkUrlTest {
     }
 
     @Test
+    fun bestOfRanksTheSingleDimensionSuffix() {
+        // Artist and channel art offers `=s192` / `=s576` / `=s1200`. Scoring only `=w` gave all
+        // three zero, and picking the max of a set of zeros returns the *first* — the smallest —
+        // so a row that offered 1200 px was served at 192 px.
+        val picked = ArtworkUrl.bestOf(
+            listOf(
+                "https://yt3.googleusercontent.com/avatar=s192",
+                "https://yt3.googleusercontent.com/avatar=s1200",
+                "https://yt3.googleusercontent.com/avatar=s576"
+            )
+        )
+        assertEquals("https://yt3.googleusercontent.com/avatar=w1080-h1080", picked)
+    }
+
+    @Test
+    fun bestOfPrefersTheSSuffixOverAnUnrelatedWSuffix() {
+        // Sanity on the ordering itself: 1200 must beat 544 regardless of spelling.
+        val picked = ArtworkUrl.bestOf(
+            listOf(
+                "https://yt3.googleusercontent.com/a=w544-h544-l90-rj",
+                "https://yt3.googleusercontent.com/a=s1200"
+            )
+        )
+        assertEquals("https://yt3.googleusercontent.com/a=w1080-h1080", picked)
+    }
+
+    @Test
     fun bestOfEmptyIsBlank() {
         assertEquals("", ArtworkUrl.bestOf(emptyList()))
     }
@@ -171,6 +202,6 @@ class ArtworkUrlTest {
     @Test
     fun bestOfSkipsBlankEntries() {
         val picked = ArtworkUrl.bestOf(listOf("", "https://lh3.googleusercontent.com/a=w120-h120-rj"))
-        assertEquals("https://lh3.googleusercontent.com/a=w1080-h1080-rj", picked)
+        assertEquals("https://lh3.googleusercontent.com/a=w1080-h1080", picked)
     }
 }
