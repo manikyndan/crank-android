@@ -40,6 +40,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.automirrored.filled.TrendingDown
 import androidx.compose.material.icons.automirrored.filled.TrendingUp
 import androidx.compose.material3.Icon
@@ -62,6 +63,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
@@ -75,14 +77,8 @@ import coil3.compose.AsyncImage
 import com.crank.music.domain.model.Collection
 import com.crank.music.domain.model.Song
 import com.crank.music.ui.components.NotificationPanel
-import com.crank.music.ui.theme.ChampagneGold
 import com.crank.music.ui.theme.CharcoalElevated
-import com.crank.music.ui.theme.CharcoalSurface
-import com.crank.music.ui.theme.GoldDark
-import com.crank.music.ui.theme.ObsidianBlack
 import com.crank.music.ui.theme.TextSecondary
-import com.crank.music.ui.theme.TextTertiary
-import com.crank.music.ui.theme.WarmWhite
 import com.crank.music.ui.components.ShimmerBox
 import com.crank.music.ui.components.StaggeredFadeIn
 import com.crank.music.ui.viewmodel.HomeViewModel
@@ -108,7 +104,7 @@ fun HomeScreen(
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
-            .background(ObsidianBlack),
+            .background(MaterialTheme.colorScheme.background),
         contentPadding = PaddingValues(bottom = 100.dp),
         verticalArrangement = Arrangement.spacedBy(0.dp)
     ) {
@@ -200,88 +196,68 @@ private fun GreetingHeader(
     onNotificationClick: () -> Unit,
     onProfileClick: () -> Unit
 ) {
-    Row(
+    Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 20.dp, vertical = 16.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
+            .padding(start = 20.dp, end = 12.dp, top = 20.dp, bottom = 8.dp)
     ) {
+        // Actions sit above the title, which is the whole point of this arrangement: a greeting
+        // is not the most important thing on the screen, so it does not get the top line. It also
+        // stops the header from being a row of two unrelated controls with a title sandwiched
+        // between them, which is what the previous left-avatar/right-bell layout produced.
         Row(
-            modifier = Modifier
-                .clip(RoundedCornerShape(12.dp))
-                .clickable { onProfileClick() }
-                .padding(4.dp),
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.End,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Surface(
-                modifier = Modifier
-                    .size(40.dp)
-                    .shadow(4.dp, CircleShape),
-                shape = CircleShape,
-                color = CharcoalSurface
-            ) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .background(
-                            Brush.linearGradient(
-                                colors = listOf(ChampagneGold, GoldDark)
-                            )
-                        ),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = "M",
-                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                        color = ObsidianBlack
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.width(12.dp))
-
-            Column {
-                Text(
-                    text = greeting,
-                    style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold),
-                    color = WarmWhite
-                )
-            }
-        }
-
-        Box {
             IconButton(
                 onClick = onNotificationClick,
-                modifier = Modifier.size(44.dp)
+                modifier = Modifier.size(40.dp)
             ) {
                 Icon(
                     imageVector = Icons.Default.Notifications,
                     contentDescription = "Notifications",
-                    tint = WarmWhite,
-                    modifier = Modifier.size(26.dp)
+                    tint = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.size(22.dp)
+                )
+            }
+
+            Spacer(modifier = Modifier.width(4.dp))
+
+            // Opens Settings. This was the avatar for the removed You tab; with that hub gone it
+            // is the only way into Settings, so it navigates straight there and is drawn as a
+            // plain glyph rather than a gold gradient disc, which read as a profile photo the app
+            // does not actually have.
+            IconButton(
+                onClick = onProfileClick,
+                modifier = Modifier.size(40.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Settings,
+                    contentDescription = "Settings",
+                    tint = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.size(22.dp)
                 )
             }
 
             if (notificationCount > 0) {
                 Box(
                     modifier = Modifier
-                        .align(Alignment.TopEnd)
-                        .padding(end = 6.dp, top = 6.dp)
-                        .size(18.dp)
+                        .padding(end = 4.dp)
+                        .size(7.dp)
                         .clip(CircleShape)
-                        .background(ChampagneGold),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = if (notificationCount > 9) "9+" else "$notificationCount",
-                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                        color = ObsidianBlack,
-                        fontSize = 9.sp
-                    )
-                }
+                        .background(MaterialTheme.colorScheme.primary)
+                )
             }
         }
+
+        Spacer(modifier = Modifier.height(4.dp))
+
+        Text(
+            text = greeting,
+            style = MaterialTheme.typography.headlineLarge.copy(fontWeight = FontWeight.Bold),
+            color = MaterialTheme.colorScheme.onSurface
+        )
     }
 }
 
@@ -321,7 +297,7 @@ private fun RecentlyPlayedCard(
 ) {
     var isPressed by remember { mutableStateOf(false) }
     val scale by animateFloatAsState(
-        targetValue = if (isPressed) 1.05f else 1f,
+        targetValue = if (isPressed) 0.96f else 1f,
         animationSpec = spring(
             dampingRatio = Spring.DampingRatioMediumBouncy,
             stiffness = Spring.StiffnessHigh
@@ -331,7 +307,7 @@ private fun RecentlyPlayedCard(
 
     Column(
         modifier = Modifier
-            .width(150.dp)
+            .width(156.dp)
             .graphicsLayer {
                 scaleX = scale
                 scaleY = scale
@@ -346,37 +322,43 @@ private fun RecentlyPlayedCard(
             }
             .clickable { onClick() }
     ) {
+        // The heavy 8dp shadow and the charcoal backing plate are gone. A card is a picture of
+        // an album; giving the picture a drop shadow and a coloured mount makes it look like a
+        // framed object rather than a cover. The artwork now sits directly on the page at a
+        // larger size, which is what gives a music grid its density.
         Surface(
             modifier = Modifier
-                .size(150.dp)
-                .shadow(8.dp, RoundedCornerShape(12.dp)),
-            shape = RoundedCornerShape(12.dp),
-            color = CharcoalSurface
+                .size(156.dp),
+            shape = RoundedCornerShape(10.dp),
+            color = MaterialTheme.colorScheme.surfaceVariant
         ) {
             Box {
                 AsyncImage(
                     model = item.song.artworkUrl,
                     contentDescription = item.song.title,
+                    contentScale = ContentScale.Crop,
                     modifier = Modifier.fillMaxSize()
                 )
 
+                // Press feedback is a scrim plus a small play affordance, not a full-size gold
+                // disc. The disc covered most of the cover at this card size.
                 if (isPressed) {
                     Surface(
                         modifier = Modifier.fillMaxSize(),
-                        color = Color.Black.copy(alpha = 0.4f)
+                        color = Color.Black.copy(alpha = 0.35f)
                     ) {
                         Box(contentAlignment = Alignment.Center) {
                             Surface(
-                                modifier = Modifier.size(48.dp),
+                                modifier = Modifier.size(40.dp),
                                 shape = CircleShape,
-                                color = ChampagneGold
+                                color = MaterialTheme.colorScheme.primary
                             ) {
                                 Box(contentAlignment = Alignment.Center) {
                                     Icon(
                                         imageVector = Icons.Default.PlayArrow,
                                         contentDescription = "Play",
-                                        tint = ObsidianBlack,
-                                        modifier = Modifier.size(28.dp)
+                                        tint = MaterialTheme.colorScheme.onPrimary,
+                                        modifier = Modifier.size(22.dp)
                                     )
                                 }
                             }
@@ -386,20 +368,21 @@ private fun RecentlyPlayedCard(
             }
         }
 
-        Spacer(modifier = Modifier.height(8.dp))
+        Spacer(modifier = Modifier.height(10.dp))
 
         Text(
             text = item.song.title,
             style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
-            color = WarmWhite,
+            color = MaterialTheme.colorScheme.onSurface,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis
         )
         Text(
             text = item.lastPlayedText,
             style = MaterialTheme.typography.labelSmall,
-            color = TextTertiary,
-            maxLines = 1
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
         )
     }
 }
@@ -434,7 +417,7 @@ private fun QuickActionChip(
         "repeat" -> listOf(Color(0xFF1E3264), Color(0xFF3498DB))
         "time" -> listOf(Color(0xFFE13300), Color(0xFFE74C3C))
         "discover" -> listOf(Color(0xFF1DB954), Color(0xFF2ECC71))
-        else -> listOf(ChampagneGold, GoldDark)
+        else -> listOf(MaterialTheme.colorScheme.primary, MaterialTheme.colorScheme.primaryContainer)
     }
 
     Surface(
@@ -466,8 +449,8 @@ private fun QuickActionChip(
                 Spacer(modifier = Modifier.width(6.dp))
                 Text(
                     text = action.label,
-                    style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
-                    color = WarmWhite
+                    style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Medium),
+                    color = MaterialTheme.colorScheme.onSurface
                 )
             }
         }
@@ -519,16 +502,15 @@ private fun RecommendedCard(
         modifier = Modifier.width(160.dp)
     ) {
         Surface(
-            modifier = Modifier
-                .size(160.dp)
-                .shadow(6.dp, RoundedCornerShape(12.dp)),
-            shape = RoundedCornerShape(12.dp),
-            color = CharcoalSurface
+            modifier = Modifier.size(160.dp),
+            shape = RoundedCornerShape(10.dp),
+            color = MaterialTheme.colorScheme.surfaceVariant
         ) {
             Box {
                 AsyncImage(
                     model = item.song.artworkUrl,
                     contentDescription = item.song.title,
+                    contentScale = ContentScale.Crop,
                     modifier = Modifier.fillMaxSize()
                 )
 
@@ -543,7 +525,7 @@ private fun RecommendedCard(
                     Icon(
                         imageVector = Icons.Default.Close,
                         contentDescription = "Dismiss",
-                        tint = WarmWhite,
+                        tint = Color.White,
                         modifier = Modifier.size(14.dp)
                     )
                 }
@@ -552,13 +534,13 @@ private fun RecommendedCard(
                     modifier = Modifier
                         .align(Alignment.BottomStart)
                         .padding(8.dp),
-                    color = Color.Black.copy(alpha = 0.7f),
+                    color = Color.Black.copy(alpha = 0.65f),
                     shape = RoundedCornerShape(6.dp)
                 ) {
                     Text(
                         text = item.reason,
                         style = MaterialTheme.typography.labelSmall,
-                        color = WarmWhite,
+                        color = Color.White,
                         modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
@@ -572,14 +554,14 @@ private fun RecommendedCard(
         Text(
             text = item.song.title,
             style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
-            color = WarmWhite,
+            color = MaterialTheme.colorScheme.onSurface,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis
         )
         Text(
             text = item.song.artistName,
             style = MaterialTheme.typography.labelSmall,
-            color = TextTertiary,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis
         )
@@ -629,7 +611,7 @@ private fun TrendingRow(
         Text(
             text = "${item.rank}",
             style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
-            color = if (item.rank <= 3) ChampagneGold else TextTertiary,
+            color = if (item.rank <= 3) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.width(30.dp),
             textAlign = TextAlign.Center
         )
@@ -638,12 +620,13 @@ private fun TrendingRow(
 
         Surface(
             modifier = Modifier.size(48.dp),
-            shape = RoundedCornerShape(8.dp),
-            color = CharcoalSurface
+            shape = RoundedCornerShape(6.dp),
+            color = MaterialTheme.colorScheme.surfaceVariant
         ) {
             AsyncImage(
                 model = item.song.artworkUrl,
                 contentDescription = null,
+                contentScale = ContentScale.Crop,
                 modifier = Modifier.fillMaxSize()
             )
         }
@@ -654,14 +637,14 @@ private fun TrendingRow(
             Text(
                 text = item.song.title,
                 style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
-                color = WarmWhite,
+                color = MaterialTheme.colorScheme.onSurface,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
             Text(
                 text = item.song.artistName,
                 style = MaterialTheme.typography.labelSmall,
-                color = TextTertiary,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
@@ -680,7 +663,7 @@ private fun TrendingRow(
                 tint = when (item.trend) {
                     "up" -> Color(0xFF4CAF50)
                     "down" -> Color(0xFFFF5252)
-                    else -> TextTertiary
+                    else -> MaterialTheme.colorScheme.onSurfaceVariant
                 },
                 modifier = Modifier.size(18.dp)
             )
@@ -760,8 +743,8 @@ private fun MadeForYouCard(
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
                         text = playlist.title,
-                        style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
-                        color = WarmWhite,
+                        style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Medium),
+                        color = MaterialTheme.colorScheme.onSurface,
                         textAlign = TextAlign.Center,
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis
@@ -775,14 +758,14 @@ private fun MadeForYouCard(
         Text(
             text = playlist.subtitle,
             style = MaterialTheme.typography.labelSmall,
-            color = TextTertiary,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis
         )
         Text(
             text = playlist.lastUpdated,
             style = MaterialTheme.typography.labelSmall,
-            color = TextTertiary.copy(alpha = 0.7f),
+            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
             maxLines = 1
         )
     }
@@ -798,25 +781,29 @@ private fun SectionHeaderRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 20.dp, vertical = 8.dp),
+            .padding(start = 20.dp, end = 12.dp, top = 24.dp, bottom = 10.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
+        verticalAlignment = Alignment.Bottom
     ) {
         Text(
             text = title,
-            style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
-            color = WarmWhite
+            style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold),
+            color = MaterialTheme.colorScheme.onSurface
         )
 
         Row(verticalAlignment = Alignment.CenterVertically) {
+            // "See All" is secondary to the section title, so it is set in the muted colour at
+            // label size rather than in the accent. An accent-coloured "See All" on every row
+            // meant six competing calls to action per screen, which is what made the home feed
+            // feel busy despite being mostly empty space.
             Text(
                 text = "See All",
                 style = MaterialTheme.typography.labelLarge,
-                color = ChampagneGold,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier
                     .clip(RoundedCornerShape(8.dp))
                     .clickable { onSeeAllClick?.invoke() }
-                    .padding(horizontal = 8.dp, vertical = 4.dp)
+                    .padding(horizontal = 8.dp, vertical = 6.dp)
             )
 
             if (showRefresh && onRefresh != null) {
@@ -827,7 +814,7 @@ private fun SectionHeaderRow(
                     Icon(
                         imageVector = Icons.Default.Refresh,
                         contentDescription = "Refresh",
-                        tint = ChampagneGold,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.size(18.dp)
                     )
                 }
@@ -843,12 +830,15 @@ private fun LoadingSkeleton() {
         verticalArrangement = Arrangement.spacedBy(20.dp)
     ) {
         repeat(3) {
+            // Neutral shimmer. A tinted shimmer on a card-shaped block reads as content rather
+            // than as absence, and it also committed the skeleton to a colour the real artwork
+            // would not match.
             ShimmerBox(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(180.dp),
-                shimmerColor = ChampagneGold.copy(alpha = 0.08f),
-                baseColor = CharcoalSurface
+                shimmerColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.06f),
+                baseColor = MaterialTheme.colorScheme.surfaceVariant
             )
         }
     }
