@@ -23,6 +23,7 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.crank.music.domain.model.Album
 import com.crank.music.feature.recognition.RecognitionScreen
+import com.crank.music.feature.ytmusic.YtMusicHomeScreen
 import com.crank.music.ui.components.BottomNavigationBar
 import com.crank.music.ui.components.MiniPlayer
 import com.crank.music.ui.components.NavItem
@@ -131,6 +132,28 @@ fun MainScreen(
                     },
                     onAlbumClick = { album ->
                         navController.navigate(albumRoute(album))
+                    }
+                )
+            }
+            // NEW additive destination: YouTube Music-style home feed.
+            // Existing routes above/below are untouched; this reuses the same
+            // PlayerViewModel callbacks and Collection-slug navigation contract.
+            composable(NavItem.Discover.route) {
+                YtMusicHomeScreen(
+                    onSongSelect = { selectedSong ->
+                        playerViewModel.playSong(selectedSong)
+                    },
+                    onSongSelectWithContext = { selectedSong, contextList ->
+                        playerViewModel.playSongWithContext(selectedSong, contextList)
+                    },
+                    onPlaylistClick = { collectionSlug ->
+                        navController.navigate("playlist_detail/$collectionSlug")
+                    },
+                    onAlbumClick = { album ->
+                        navController.navigate(albumRoute(album))
+                    },
+                    onArtistClick = { artistName ->
+                        navController.navigate("search?q=$artistName")
                     }
                 )
             }

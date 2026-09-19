@@ -31,6 +31,7 @@ import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.LibraryMusic
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.outlined.MusicNote
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.outlined.Explore
@@ -86,6 +87,15 @@ sealed class NavItem(
     object Search : NavItem("search", "Search", Icons.Filled.Search, Icons.Outlined.Search)
 
     /**
+     * NEW additive destination: YouTube Music-style home feed.
+     *
+     * Added alongside the existing four tabs; none of the existing routes,
+     * labels or icons were touched. Remove this object + its MainScreen
+     * composable to revert without affecting anything else.
+     */
+    object Discover : NavItem("ytmusic_home", "Discover", Icons.Filled.MusicNote, Icons.Outlined.MusicNote)
+
+    /**
      * Removed: `Create` ("Crank AI") and `You`.
      *
      * `You` routed to `ProfileScreen`, which was the only entry point for Settings, Downloads,
@@ -105,6 +115,7 @@ fun BottomNavigationBar(
     val items = listOf(
         NavItem.Home,
         NavItem.Browse,
+        NavItem.Discover,
         NavItem.Library,
         NavItem.Search
     )
