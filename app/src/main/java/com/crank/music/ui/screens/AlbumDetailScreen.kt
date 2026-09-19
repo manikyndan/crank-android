@@ -130,7 +130,12 @@ fun AlbumDetailScreen(
                 Spacer(modifier = Modifier.height(4.dp))
 
                 Text(
-                    text = "${album?.artistName ?: "Artist"} • ${album?.releaseYear ?: "2024"}",
+                    // Build the line from the parts we actually have. Previously this fell back to
+                    // a hardcoded "2024", so an unknown year silently rendered as a specific one.
+                    text = listOfNotNull(
+                        album?.artistName?.takeIf { it.isNotBlank() },
+                        album?.releaseYear?.takeIf { it.isNotBlank() },
+                    ).joinToString(" • ").ifBlank { "Artist" },
                     style = MaterialTheme.typography.bodyLarge,
                     color = TextSecondary
                 )

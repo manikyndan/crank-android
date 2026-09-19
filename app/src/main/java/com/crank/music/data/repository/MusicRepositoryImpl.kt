@@ -6,6 +6,7 @@ import com.crank.music.data.local.toDomainModel
 import com.crank.music.data.remote.RemoteDataSource
 import com.crank.music.data.remote.StreamData
 import com.crank.music.data.remote.StreamResolver
+import com.crank.music.data.remote.innertube.InnerTubeApi
 import com.crank.music.domain.model.Album
 import com.crank.music.domain.model.Song
 import com.crank.music.domain.repository.LyricsSearchResult
@@ -15,6 +16,7 @@ import io.ktor.client.call.body
 import io.ktor.client.request.get
 import io.ktor.client.request.parameter
 import io.ktor.client.statement.bodyAsText
+import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.json.*
 import javax.inject.Inject
 
@@ -22,13 +24,19 @@ class MusicRepositoryImpl @Inject constructor(
     private val songDao: SongDao,
     private val remoteDataSource: RemoteDataSource,
     private val streamResolver: StreamResolver,
+    private val innerTubeApi: InnerTubeApi,
     private val httpClient: HttpClient
 ) : MusicRepository {
 
     override suspend fun search(query: String): List<Song> {
         if (query.isBlank()) return emptyList()
+        // Cancellation must propagate: this runs inside a debounced, cancellable search job, so
+        // swallowing CancellationException here left the coroutine alive past its cancellation
+        // point and searches never settled. See CoroutineDiscipline.
         val remoteResults = try {
             remoteDataSource.searchMusic(query)
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             Log.e("CRANK_INTEGRATION", "Search failed: ${e.message}", e)
             emptyList()
@@ -48,24 +56,16 @@ class MusicRepositoryImpl @Inject constructor(
     }
 
     override suspend fun getHomeRecommendations(): List<Album> {
-        val remoteAlbums = try {
+        // No fabricated fallback. Returning a hardcoded "Featured Album" here made a total network
+        // failure indistinguishable from success and put fiction on screen. An empty list is the
+        // honest answer, and the UI already renders an empty state.
+        return try {
             remoteDataSource.getHomeData()
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             Log.e("CRANK_INTEGRATION", "Home recommendations failed: ${e.message}", e)
             emptyList()
-        }
-
-        return remoteAlbums.ifEmpty {
-            listOf(
-                Album(
-                    id = "album_1",
-                    title = "Featured Album",
-                    artistName = "Crank Artist",
-                    releaseYear = "2024",
-                    artworkUrl = "",
-                    trackCount = 10
-                )
-            )
         }
     }
 
@@ -97,6 +97,18 @@ class MusicRepositoryImpl @Inject constructor(
             artworkUrl = "",
             isLocal = false
         )
+    }
+
+    override suspend fun getLyricsByVideoId(videoId: String): String? {
+        if (videoId.isBlank()) return null
+        return try {
+            innerTubeApi.fetchLyrics(videoId)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Log.d("CRANK_LYRICS", "YouTube Music lyrics failed for $videoId: ${e.message}")
+            null
+        }
     }
 
     override suspend fun searchLyrics(trackName: String, artistName: String): LyricsSearchResult? {
@@ -132,6 +144,8 @@ class MusicRepositoryImpl @Inject constructor(
                 plainLyrics = obj["plainLyrics"]?.jsonPrimitive?.content,
                 syncedLyrics = obj["syncedLyrics"]?.jsonPrimitive?.content
             )
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             Log.e("CRANK_LYRICS", "LRCLIB search failed: ${e.javaClass.simpleName}: ${e.message}", e)
             null

@@ -1,88 +1,200 @@
 package com.crank.music.data.remote
 
 import android.util.Log
+import com.crank.music.data.remote.innertube.StreamCascadeResolver
+import com.crank.music.data.remote.innertube.StreamUnavailableException
+import com.crank.music.data.remote.potoken.PoTokenGenerator
 import javax.inject.Inject
 import javax.inject.Singleton
 
+/** A resolved, directly playable stream. */
 data class StreamData(
     val url: String,
-    val headers: Map<String, String> = emptyMap()
+    val headers: Map<String, String> = emptyMap(),
+    /**
+     * How long the URL remains valid, when the source reports it.
+     *
+     * Carried out of the resolver so callers can decide whether the URL is worth persisting.
+     * A YouTube URL persisted past its expiry is permanently dead and must be re-resolved — see
+     * [isExpired].
+     */
+    val expiresInSeconds: Int? = null,
+    /** Which client identity produced this stream. Useful in logs when quality varies. */
+    val sourceClient: String? = null,
 )
 
+/**
+ * The single entry point for turning a track id into a playable stream URL.
+ *
+ * ## What changed, and why this class still exists
+ *
+ * Previously this delegated to `YouTubeStreamResolver`, which tried eight independent strategies
+ * with no shared state and no record of what happened. That has been replaced by
+ * [StreamCascadeResolver], which mints a Proof-of-Origin token once and then walks a measured
+ * client chain. This class remains as the seam because it owns two things the cascade should not
+ * know about:
+ *
+ * 1. **URL expiry semantics** — the pure functions below. These are unchanged and still correct;
+ *    they were the one part of the old implementation that held up under test.
+ * 2. **Visitor data lifetime** — a long-lived id that must be fetched once and reused, not per
+ *    request.
+ */
 @Singleton
 class StreamResolver @Inject constructor(
-    private val youtubeStreamResolver: YouTubeStreamResolver
+    private val cascadeResolver: StreamCascadeResolver,
+    private val poTokenGenerator: PoTokenGenerator,
+    private val visitorDataProvider: VisitorDataProvider,
 ) {
+
+    /**
+     * Warms the pieces that are expensive on first use: the visitor id, and the BotGuard WebView.
+     *
+     * Both are safe to call repeatedly and both are best-effort. A failure here degrades which
+     * clients can serve a stream; it must not prevent the app from starting.
+     */
     suspend fun init() {
-        try {
-            youtubeStreamResolver.fetchVisitorData()
-        } catch (e: Exception) {
-            Log.e("CRANK_STREAM", "Failed to pre-fetch visitorData: ${e.message}")
-        }
+        runCatching { visitorDataProvider.visitorData() }
+            .onFailure { Log.w(TAG, "visitorData prefetch failed: ${it.message}") }
+
+        // Warms the WebView in the background so the first play does not pay the cold-start cost.
+        poTokenGenerator.initialize()
     }
 
-    suspend fun resolveStreamUrl(videoId: String, songTitle: String = "", artistName: String = ""): StreamData {
-        Log.d("CRANK_STREAM", "Resolving: $videoId ($songTitle - $artistName)")
-        return youtubeStreamResolver.getSongStreamUrl(videoId, songTitle, artistName)
+    /** True when the BotGuard asset needed for Proof-of-Origin tokens is present. */
+    fun isPoTokenAvailable(): Boolean = poTokenGenerator.isAvailable()
+
+    /**
+     * Resolves [videoId] to a directly playable URL.
+     *
+     * Throws [StreamUnavailableException] when the whole cascade fails. That exception carries a
+     * per-client attempt record, so a caller reporting the failure can say *why* rather than
+     * just *that* it failed.
+     */
+    suspend fun resolveStreamUrl(
+        videoId: String,
+        songTitle: String = "",
+        artistName: String = "",
+    ): StreamData {
+        // A value that is already a URL needs no resolving. Persisted stream URLs are stored in
+        // this column, so this branch is hit on every replay of a previously-resolved track.
+        if (videoId.startsWith("http://") || videoId.startsWith("https://")) {
+            if (isDirectlyPlayable(videoId)) {
+                return StreamData(url = videoId, headers = MEDIA_HEADERS)
+            }
+            // Expired: fall through only if we have an id to re-resolve with, which we do not
+            // when the value is a bare URL. Surfacing it as unavailable is correct here.
+            throw StreamUnavailableException(
+                videoId = videoId,
+                attempts = emptyList(),
+                hint = "The stored stream URL has expired and no video id is available to " +
+                    "re-resolve it. The track needs to be looked up again.",
+            )
+        }
+
+        val visitorData = runCatching { visitorDataProvider.visitorData() }.getOrNull()
+        val dataSyncId = visitorDataProvider.dataSyncId()
+        val isLoggedIn = dataSyncId != null
+
+        val resolution =
+            cascadeResolver.resolve(
+                videoId = videoId,
+                visitorData = visitorData,
+                dataSyncId = dataSyncId,
+                isLoggedIn = isLoggedIn,
+            )
+
+        Log.d(
+            TAG,
+            "Resolved $videoId via ${resolution.client.label} " +
+                "(expires=${resolution.expiresInSeconds}s, pot=${resolution.hasPoToken})",
+        )
+
+        return StreamData(
+            url = resolution.url,
+            headers = MEDIA_HEADERS,
+            expiresInSeconds = resolution.expiresInSeconds,
+            sourceClient = resolution.client.label,
+        )
     }
 
     companion object {
+        private const val TAG = "CRANK_STREAM"
+
+        /**
+         * Headers sent when fetching media from the CDN.
+         *
+         * These are deliberately minimal. A signed googlevideo URL carries its own
+         * authorization, and adding the client's own user agent or extra query parameters was
+         * measured to change nothing — including for URLs that 403 for reasons unrelated to
+         * headers. What matters is that the request looks like a media fetch rather than a
+         * browser navigation.
+         */
+        private val MEDIA_HEADERS =
+            mapOf(
+                "User-Agent" to
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
+                        "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+                "Accept" to "*/*",
+                "Accept-Language" to "en-US,en;q=0.9",
+                "Origin" to "https://www.youtube.com",
+                "Referer" to "https://www.youtube.com/",
+            )
+
         /** Hosts that serve YouTube's signed, expiring stream URLs. */
-        private val YOUTUBE_MEDIA_HOSTS = listOf(
-            "googlevideo.com",
-            "youtube.com",
-            "ytimg.com"
-        )
+        private val YOUTUBE_MEDIA_HOSTS =
+            listOf(
+                "googlevideo.com",
+                "youtube.com",
+                "ytimg.com",
+            )
 
         /**
          * True when [url] carries its own expiry and that moment has passed.
          *
-         * YouTube hands out CDN URLs with an `expire=<unixSeconds>` parameter, and
-         * a URL past that instant is answered with HTTP 403 — permanently, no
-         * matter how many times it is retried. Detecting it up front turns an
-         * opaque player error into a re-resolve.
+         * YouTube hands out CDN URLs with an `expire=<unixSeconds>` parameter, and a URL past
+         * that instant is answered with HTTP 403 — permanently, no matter how many times it is
+         * retried. Detecting it up front turns an opaque player error into a re-resolve.
          *
-         * URLs with no `expire` (third-party frontends, plain file URLs) are
-         * treated as usable; we have no grounds to reject them here.
+         * URLs with no `expire` (plain file URLs, stable sources) are treated as usable; there
+         * are no grounds to reject them here.
          */
         fun isExpired(url: String, nowSeconds: Long = System.currentTimeMillis() / 1000L): Boolean {
             if (!url.startsWith("http")) return false
 
             val expiry = extractQueryParam(url, "expire")?.toLongOrNull() ?: return false
 
-            // A little slack so a URL that is about to lapse mid-handshake is
-            // treated as already gone rather than starting a request it will lose.
+            // A little slack so a URL about to lapse mid-handshake is treated as already gone
+            // rather than starting a request it will lose.
             return expiry <= nowSeconds + 30L
         }
 
         /**
-         * True when [url] points at a source whose signed URLs rot and therefore
-         * cannot be trusted across app restarts.
+         * True when [url] points at a source whose signed URLs rot and therefore cannot be
+         * trusted across app restarts.
          *
-         * Only YouTube media is in scope. A URL pointing anywhere else — a
-         * podcast feed, a local file, a third-party mirror known to serve stable
-         * links — is left alone, because re-resolving those would be wrong.
+         * Only YouTube media is in scope. A URL pointing anywhere else — a podcast feed, a local
+         * file — is left alone, because re-resolving those would be wrong.
+         *
+         * The host check is anchored on a dot boundary, so a look-alike such as
+         * `notgooglevideo.com` is not misclassified as a YouTube host.
          */
         fun isRottingUrl(url: String): Boolean {
             if (!url.startsWith("http")) return false
             val host = runCatching { java.net.URI(url).host }.getOrNull() ?: return false
-            return YOUTUBE_MEDIA_HOSTS.any { host == it || host.endsWith(".$it") }
+            return YOUTUBE_MEDIA_HOSTS.any { domain -> host == domain || host.endsWith(".$domain") }
         }
 
         /**
-         * True when [streamUrl] can be handed to ExoPlayer as-is.
+         * True when [streamUrl] can be handed to the player as-is.
          *
-         * A blank value, a non-URL identifier (a bare video ID needs resolving),
-         * or a YouTube URL that has expired all mean "resolve this again".
+         * A blank value, a non-URL identifier (a bare video id needs resolving), or a YouTube URL
+         * that has expired all mean "resolve this again".
          *
-         * [nowSeconds] exists so callers — and tests — can supply their own
-         * clock. Without it this was untestable, and the expiry comparison
-         * silently ran against wall-clock time even in cases built to exercise
-         * a different instant.
+         * [nowSeconds] exists so callers — and tests — can supply their own clock.
          */
         fun isDirectlyPlayable(
             streamUrl: String,
-            nowSeconds: Long = System.currentTimeMillis() / 1000L
+            nowSeconds: Long = System.currentTimeMillis() / 1000L,
         ): Boolean {
             if (!streamUrl.startsWith("http")) return false
             if (!isRottingUrl(streamUrl)) return true
@@ -98,4 +210,28 @@ class StreamResolver @Inject constructor(
             }
         }
     }
+}
+
+/**
+ * Supplies the visitor id and account id the cascade needs.
+ *
+ * An interface rather than a direct dependency so that the cascade can be exercised in tests
+ * without a network, and so the storage choice (DataStore today) is not baked into playback.
+ */
+interface VisitorDataProvider {
+    /**
+     * The visitor data id.
+     *
+     * Required: the clients that can serve a whole file answer `LOGIN_REQUIRED` with zero
+     * formats when this is absent. Fetched once and cached; it is long-lived.
+     */
+    suspend fun visitorData(): String?
+
+    /**
+     * The account-scoped data-sync id, or `null` when signed out.
+     *
+     * When present it binds Proof-of-Origin tokens to the account rather than to the visitor,
+     * and enables the login-gated clients.
+     */
+    suspend fun dataSyncId(): String?
 }

@@ -15,10 +15,13 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavHostController
+import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import androidx.navigation.navArgument
+import com.crank.music.domain.model.Album
 import com.crank.music.feature.recognition.RecognitionScreen
 import com.crank.music.ui.components.BottomNavigationBar
 import com.crank.music.ui.components.MiniPlayer
@@ -100,8 +103,17 @@ fun MainScreen(
                     onSongSelectWithContext = { selectedSong, contextList ->
                         playerViewModel.playSongWithContext(selectedSong, contextList)
                     },
-                    onPlaylistClick = { playlistId ->
-                        navController.navigate("playlist_detail/$playlistId")
+                    onPlaylistClick = { collectionSlug ->
+                        navController.navigate("playlist_detail/$collectionSlug")
+                    },
+                    onProfileClick = {
+                        navController.navigate(NavItem.You.route) {
+                            popUpTo(navController.graph.startDestinationId) {
+                                saveState = true
+                            }
+                            launchSingleTop = true
+                            restoreState = true
+                        }
                     }
                 )
             }
@@ -115,6 +127,12 @@ fun MainScreen(
                     },
                     onArtistClick = { artistName ->
                         navController.navigate("search?q=$artistName")
+                    },
+                    onPlaylistClick = { collectionSlug ->
+                        navController.navigate("playlist_detail/$collectionSlug")
+                    },
+                    onAlbumClick = { album ->
+                        navController.navigate(albumRoute(album))
                     }
                 )
             }
@@ -128,8 +146,8 @@ fun MainScreen(
                     onSongSelectWithContext = { selectedSong, contextList ->
                         playerViewModel.playSongWithContext(selectedSong, contextList)
                     },
-                    onAlbumClick = { albumId ->
-                        navController.navigate("album_detail/$albumId")
+                    onAlbumClick = { album ->
+                        navController.navigate(albumRoute(album))
                     }
                 )
             }
@@ -146,8 +164,8 @@ fun MainScreen(
                     onSongSelectWithContext = { selectedSong, contextList ->
                         playerViewModel.playSongWithContext(selectedSong, contextList)
                     },
-                    onAlbumClick = { albumId ->
-                        navController.navigate("album_detail/$albumId")
+                    onAlbumClick = { album ->
+                        navController.navigate(albumRoute(album))
                     }
                 )
             }
@@ -238,7 +256,19 @@ fun MainScreen(
                     }
                 )
             }
-            composable("album_detail/{albumId}") {
+            // The album route carries the title and artist, not just an opaque id: the app's search
+            // layer resolves albums by text, so those two strings are what the destination actually
+            // needs. Passing only an id meant the screen searched for the id itself.
+            composable(
+                route = "album_detail/{albumTitle}?albumArtist={albumArtist}",
+                arguments = listOf(
+                    navArgument("albumTitle") { type = NavType.StringType },
+                    navArgument("albumArtist") {
+                        type = NavType.StringType
+                        defaultValue = ""
+                    },
+                )
+            ) {
                 AlbumDetailScreen(
                     onSongSelect = { selectedSong ->
                         playerViewModel.playSong(selectedSong)
@@ -389,4 +419,16 @@ fun MainScreen(
             }
         }
     }
+}
+
+/**
+ * Builds the album route for [album].
+ *
+ * Both values are percent-encoded because album and artist names routinely contain `/`, `?`, `#`
+ * and `&`, any of which would otherwise be read as route syntax and corrupt the argument.
+ */
+private fun albumRoute(album: Album): String {
+    val title = android.net.Uri.encode(album.title)
+    val artist = android.net.Uri.encode(album.artistName)
+    return "album_detail/$title?albumArtist=$artist"
 }

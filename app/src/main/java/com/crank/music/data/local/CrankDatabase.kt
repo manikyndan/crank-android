@@ -13,9 +13,10 @@ import androidx.room.RoomDatabase
         PlaylistSongCrossRef::class,
         HistoryEntity::class,
         SearchHistoryEntity::class,
-        PlaybackPositionEntity::class
+        PlaybackPositionEntity::class,
+        SessionEntity::class
     ],
-    version = 4,
+    version = 5,
     exportSchema = true
 )
 abstract class CrankDatabase : RoomDatabase() {

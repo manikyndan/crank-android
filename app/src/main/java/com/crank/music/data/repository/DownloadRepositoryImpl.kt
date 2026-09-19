@@ -11,7 +11,6 @@ import com.crank.music.data.local.SongDao
 import com.crank.music.data.local.toDomainModel
 import com.crank.music.data.local.toEntity
 import com.crank.music.data.remote.StreamResolver
-import com.crank.music.data.remote.YouTubeStreamResolver
 import com.crank.music.domain.model.DownloadState
 import com.crank.music.domain.model.Song
 import com.crank.music.domain.repository.DownloadRepository
@@ -25,7 +24,7 @@ import javax.inject.Inject
 class DownloadRepositoryImpl @Inject constructor(
     private val downloadManager: DownloadManager,
     private val songDao: SongDao,
-    private val streamResolver: YouTubeStreamResolver
+    private val streamResolver: StreamResolver
 ) : DownloadRepository {
 
     override suspend fun downloadSong(song: Song) {
@@ -54,7 +53,7 @@ class DownloadRepositoryImpl @Inject constructor(
                     )
                 }
                 try {
-                    streamResolver.getSongStreamUrl(song.id, song.title, song.artistName).url
+                    streamResolver.resolveStreamUrl(song.id, song.title, song.artistName).url
                 } catch (e: Exception) {
                     // Previously this fell back to `song.artworkUrl`, or failing
                     // that to a hardcoded soundhelix.com demo MP3. Downloading the

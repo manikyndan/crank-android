@@ -74,15 +74,15 @@ fun PlaylistDetailScreen(
             title = {
                 Column {
                     Text(
-                        text = uiState.playlistTitle,
+                        text = uiState.title,
                         style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
                         color = WarmWhite,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
-                    if (uiState.playlistSubtitle.isNotEmpty()) {
+                    if (uiState.subtitle.isNotEmpty()) {
                         Text(
-                            text = uiState.playlistSubtitle,
+                            text = uiState.subtitle,
                             style = MaterialTheme.typography.bodySmall,
                             color = TextTertiary
                         )

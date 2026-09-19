@@ -97,4 +97,17 @@ interface SongDao {
 
     @Query("DELETE FROM playback_position")
     suspend fun clearPlaybackState()
+
+    // ── Session values ────────────────────────────────────────────────────────
+    // Session-scoped strings that outlive a process but are not library data.
+    // Currently holds the YouTube visitor id.
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun putSessionValue(entry: SessionEntity)
+
+    @Query("SELECT value FROM session_values WHERE `key` = :key")
+    suspend fun getSessionValue(key: String): String?
+
+    @Query("DELETE FROM session_values WHERE `key` = :key")
+    suspend fun deleteSessionValue(key: String)
 }

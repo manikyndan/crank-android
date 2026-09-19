@@ -74,6 +74,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import coil3.compose.AsyncImage
+import com.crank.music.domain.model.Album
 import com.crank.music.domain.model.Song
 import com.crank.music.ui.theme.ChampagneGold
 import com.crank.music.ui.theme.CharcoalElevated
@@ -90,7 +91,15 @@ fun ExploreScreen(
     exploreViewModel: ExploreViewModel = hiltViewModel(),
     onSongSelect: (Song) -> Unit = {},
     onSongSelectWithContext: (Song, List<Song>) -> Unit = { song, _ -> onSongSelect(song) },
-    onArtistClick: (String) -> Unit = {}
+    onArtistClick: (String) -> Unit = {},
+    /**
+     * Opens a collection by its slug — either a [Collection] or a `genre:<name>` id. The screen
+     * previously had no way to navigate to anything at all, so every genre and featured-playlist
+     * card was wired to a haptic tick and did nothing when tapped.
+     */
+    onPlaylistClick: (String) -> Unit = {},
+    /** Opens the album destination for a new-release card. */
+    onAlbumClick: (Album) -> Unit = {}
 ) {
     val uiState by exploreViewModel.uiState.collectAsState()
     val view = LocalView.current
@@ -148,14 +157,26 @@ fun ExploreScreen(
                 item {
                     GenresSection(
                         genres = uiState.genres,
-                        onGenreClick = { view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY) }
+                        // Was a bare haptic tick. A genre is now addressable as `genre:<name>`,
+                        // which PlaylistDetailViewModel resolves without needing an enum entry per
+                        // genre.
+                        onGenreClick = { genreId ->
+                            view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+                            onPlaylistClick(genreId)
+                        }
                     )
                 }
 
                 item {
                     FeaturedPlaylistsSection(
                         playlists = uiState.featuredPlaylists,
-                        onPlaylistClick = { view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY) }
+                        // Was a bare haptic tick, which is why tapping "Today's Top Hits" did
+                        // nothing. The card id is a Collection slug, so this now opens that
+                        // collection.
+                        onPlaylistClick = { playlistId ->
+                            view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+                            onPlaylistClick(playlistId)
+                        }
                     )
                 }
 
@@ -174,7 +195,12 @@ fun ExploreScreen(
                 item {
                     NewReleasesSection(
                         releases = uiState.newReleases,
-                        onAlbumClick = { view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY) }
+                        // Was another haptic-only no-op. A new release card carries an Album, so
+                        // this opens the album destination.
+                        onAlbumClick = { album ->
+                            view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+                            onAlbumClick(album)
+                        }
                     )
                 }
 
@@ -471,7 +497,7 @@ private fun SearchSuggestionRow(
 @Composable
 private fun GenresSection(
     genres: List<com.crank.music.ui.viewmodel.GenreItem>,
-    onGenreClick: () -> Unit
+    onGenreClick: (String) -> Unit
 ) {
     Column(modifier = Modifier.padding(top = 8.dp)) {
         SectionHeaderRow(title = "Genres & Moods")
@@ -483,7 +509,7 @@ private fun GenresSection(
             items(genres.chunked(2)) { pair ->
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     pair.forEach { genre ->
-                        GenreCard(genre = genre, onClick = onGenreClick)
+                        GenreCard(genre = genre, onClick = { onGenreClick(genre.id) })
                     }
                 }
             }
@@ -557,14 +583,14 @@ private fun GenreCard(
 @Composable
 private fun FeaturedPlaylistsSection(
     playlists: List<com.crank.music.ui.viewmodel.FeaturedPlaylist>,
-    onPlaylistClick: () -> Unit
+    onPlaylistClick: (String) -> Unit
 ) {
     Column(modifier = Modifier.padding(top = 24.dp)) {
         SectionHeaderRow(title = "Featured Playlists")
 
         val hero = playlists.firstOrNull { it.isHero }
         if (hero != null) {
-            HeroPlaylistCard(playlist = hero, onClick = onPlaylistClick)
+            HeroPlaylistCard(playlist = hero, onClick = { onPlaylistClick(hero.id) })
         }
 
         LazyRow(
@@ -572,7 +598,10 @@ private fun FeaturedPlaylistsSection(
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             items(playlists.filter { !it.isHero }) { playlist ->
-                FeaturedPlaylistCard(playlist = playlist, onClick = onPlaylistClick)
+                FeaturedPlaylistCard(
+                    playlist = playlist,
+                    onClick = { onPlaylistClick(playlist.id) }
+                )
             }
         }
     }
@@ -836,25 +865,32 @@ private fun ChartRow(
         }
 
         Column(horizontalAlignment = Alignment.End) {
-            Icon(
-                imageVector = when (item.trend) {
-                    "up" -> Icons.AutoMirrored.Filled.TrendingUp
-                    "down" -> Icons.AutoMirrored.Filled.TrendingDown
-                    else -> Icons.AutoMirrored.Filled.TrendingFlat
-                },
-                contentDescription = null,
-                tint = when (item.trend) {
-                    "up" -> Color(0xFF4CAF50)
-                    "down" -> Color(0xFFFF5252)
-                    else -> TextTertiary
-                },
-                modifier = Modifier.size(16.dp)
-            )
-            Text(
-                text = item.playCount,
-                style = MaterialTheme.typography.labelSmall,
-                color = TextTertiary
-            )
+            // Trend and play count are only rendered when the data actually provides them. Both
+            // used to be fabricated (arrows from `index % 3`, counts from a formula), which made the
+            // chart look informative while conveying nothing. Render nothing instead.
+            if (item.trend.isNotEmpty()) {
+                Icon(
+                    imageVector = when (item.trend) {
+                        "down" -> Icons.AutoMirrored.Filled.TrendingDown
+                        "flat" -> Icons.AutoMirrored.Filled.TrendingFlat
+                        else -> Icons.AutoMirrored.Filled.TrendingUp
+                    },
+                    contentDescription = null,
+                    tint = when (item.trend) {
+                        "up" -> Color(0xFF4CAF50)
+                        "down" -> Color(0xFFFF5252)
+                        else -> TextTertiary
+                    },
+                    modifier = Modifier.size(16.dp)
+                )
+            }
+            if (item.playCount.isNotEmpty()) {
+                Text(
+                    text = item.playCount,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = TextTertiary
+                )
+            }
         }
     }
 }
@@ -862,7 +898,7 @@ private fun ChartRow(
 @Composable
 private fun NewReleasesSection(
     releases: List<com.crank.music.ui.viewmodel.NewReleaseItem>,
-    onAlbumClick: () -> Unit
+    onAlbumClick: (Album) -> Unit
 ) {
     Column(modifier = Modifier.padding(top = 24.dp)) {
         SectionHeaderRow(title = "New Releases")
@@ -872,7 +908,7 @@ private fun NewReleasesSection(
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             items(releases) { release ->
-                NewReleaseCard(release = release, onClick = onAlbumClick)
+                NewReleaseCard(release = release, onClick = { onAlbumClick(release.album) })
             }
         }
     }

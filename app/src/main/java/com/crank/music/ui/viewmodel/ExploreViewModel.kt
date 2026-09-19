@@ -3,10 +3,13 @@ package com.crank.music.ui.viewmodel
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.crank.music.core.awaitOrNull
 import com.crank.music.domain.model.Album
+import com.crank.music.domain.model.Collection
 import com.crank.music.domain.model.Song
 import com.crank.music.domain.repository.MusicRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
@@ -60,6 +63,22 @@ data class SearchSuggestion(
     val imageUrl: String = ""
 )
 
+/**
+ * Featured playlists shown in Explore, in display order, each flagged whether it is the hero card.
+ * Keyed by [Collection] so the id, title and backing query cannot disagree.
+ */
+private val FEATURED_COLLECTIONS = listOf(
+    Collection.TOP_HITS to true,
+    Collection.RAP_CAVIAR to false,
+    Collection.ALL_OUT_2020S to false,
+    Collection.ROCK_CLASSICS to false,
+    Collection.CHILL_HITS to false,
+    Collection.VIVA_LATINO to false,
+)
+
+/** Query whose results seed the Browse All artist row. */
+private const val BROWSE_ARTIST_QUERY = "popular artists"
+
 data class ExploreUiState(
     val genres: List<GenreItem> = emptyList(),
     val topCharts: List<ChartItem> = emptyList(),
@@ -94,67 +113,145 @@ class ExploreViewModel @Inject constructor(
     }
 
     private fun loadExploreData() {
-        // Genres are static — load immediately
-        val genreQueries = listOf(
-            "pop", "hip hop", "rock", "electronic", "r&b",
-            "jazz", "classical", "country", "reggae", "metal"
+        // Genres.
+        //
+        // These used to point at `https://picsum.photos/...random=N` — stock Lorem-Picsum photos
+        // unrelated to the genre they labelled, and a hardcoded artist roster ("Adele", "Ariana
+        // Grande", …) that changed only when someone edited a literal. Artwork is now the real
+        // thumbnail of a representative track for each genre, which is honest data the app already
+        // knows how to fetch.
+        val genreNames = listOf(
+            "Pop", "Hip hop", "Rock", "Electronic", "R&B",
+            "Jazz", "Classical", "Country", "Reggae", "Metal",
         )
-        val genresList = genreQueries.mapIndexed { index, genre ->
-            GenreItem(
-                id = "g$index",
-                title = genre.replaceFirstChar { it.uppercase() },
-                imageUrl = "https://picsum.photos/300/200?random=${21 + index}"
+
+        // Featured playlists and their ids now come from the shared Collection vocabulary, so the
+        // card the user taps and the screen that opens agree on what is being opened.
+        val featuredPlaylistsList = FEATURED_COLLECTIONS.map { (collection, isHero) ->
+            FeaturedPlaylist(
+                id = collection.slug,
+                title = collection.title,
+                description = collection.subtitle,
+                // Filled in from real artwork once the first fetch lands; empty renders a
+                // placeholder rather than a photo of something unrelated.
+                artworkUrl = "",
+                isHero = isHero,
             )
         }
 
-        // Featured playlists are static — load immediately
-        val featuredPlaylistsList = listOf(
-            FeaturedPlaylist("fp1", "Today's Top Hits", "The biggest songs right now", "https://picsum.photos/600/400?random=51", true),
-            FeaturedPlaylist("fp2", "RapCaviar", "New music from top artists", "https://picsum.photos/300/300?random=52"),
-            FeaturedPlaylist("fp3", "All Out 2020s", "The biggest songs of the 2020s", "https://picsum.photos/300/300?random=53"),
-            FeaturedPlaylist("fp4", "Rock Classics", "Rock legends & iconic songs", "https://picsum.photos/300/300?random=54"),
-            FeaturedPlaylist("fp5", "Chill Hits", "Kick back to the best chill hits", "https://picsum.photos/300/300?random=55"),
-            FeaturedPlaylist("fp6", "Viva Latino", "The biggest Latin hits", "https://picsum.photos/300/300?random=56")
-        )
-
-        // Browse artists are static — load immediately
-        val artistNames = listOf("Adele", "Ariana Grande", "Billie Eilish", "Bruno Mars", "Dua Lipa", "Ed Sheeran", "Harry Styles", "Justin Bieber", "Lady Gaga", "The Weeknd", "Taylor Swift", "Drake")
-        val browseArtistsList = artistNames.mapIndexed { index, name ->
-            BrowseArtist(
-                id = "a$index",
-                name = name,
-                artworkUrl = "https://picsum.photos/300/300?random=${61 + index}",
-                letter = name.first()
-            )
-        }
-
-        // Show static content immediately
+        // Paint immediately with what we can already render, then let the fetches fill in art.
         _uiState.value = ExploreUiState(
-            genres = genresList,
+            genres = genreNames.mapIndexed { index, name ->
+                GenreItem(id = Collection.genre(name), title = name, imageUrl = "")
+            },
             featuredPlaylists = featuredPlaylistsList,
-            browseArtists = browseArtistsList,
             isLoading = true,
-            genresLoaded = true
+            genresLoaded = true,
         )
 
-        // Load API data in parallel
         viewModelScope.launch {
+            val genresDeferred = async { loadGenresWithArtwork(genreNames) }
             val chartsDeferred = async { loadTopCharts() }
             val releasesDeferred = async { loadNewReleases() }
             val trendingDeferred = async { loadTrendingSearches() }
+            val artistsDeferred = async { loadBrowseArtists() }
 
-            // Wait for charts first (most important)
-            val charts = chartsDeferred.await()
-            _uiState.update { it.copy(topCharts = charts, chartsLoaded = true) }
-
-            // Then releases
-            val releases = releasesDeferred.await()
-            _uiState.update { it.copy(newReleases = releases, releasesLoaded = true) }
-
-            // Then trending
-            val trending = trendingDeferred.await()
-            _uiState.update { it.copy(trendingSearches = trending, isLoading = false) }
+            // Independent results are applied as they arrive. The previous version awaited them in
+            // a strict chain, so one slow call held back every section below it.
+            //
+            // Each await is wrapped in awaitOrNull rather than runCatching, because runCatching
+            // catches Throwable — including CancellationException — which would keep this coroutine
+            // alive after its scope was cancelled.
+            chartsDeferred.awaitOrNull()?.let { charts ->
+                _uiState.update { it.copy(topCharts = charts, chartsLoaded = true) }
+            }
+            artistsDeferred.awaitOrNull()?.let { artists ->
+                _uiState.update { it.copy(browseArtists = artists) }
+            }
+            genresDeferred.awaitOrNull()?.let { genres ->
+                _uiState.update { it.copy(genres = genres) }
+            }
+            releasesDeferred.awaitOrNull()?.let { releases ->
+                _uiState.update { it.copy(newReleases = releases, releasesLoaded = true) }
+            }
+            trendingDeferred.awaitOrNull()?.let { trending ->
+                _uiState.update { it.copy(trendingSearches = trending, isLoading = false) }
+            }
+            _uiState.update { it.copy(isLoading = false) }
         }
+    }
+
+    /**
+     * Browse artists, derived from real search results rather than a hardcoded roster.
+     *
+     * This previously listed twelve fixed names ("Adele", "Ariana Grande", …) with Picsum stock
+     * photos. Deriving from a live search means the row reflects who is actually in the catalogue,
+     * and every artist carries genuine artwork.
+     */
+    private suspend fun loadBrowseArtists(): List<BrowseArtist> {
+        return try {
+            val songs = musicRepository.search(BROWSE_ARTIST_QUERY)
+            songs
+                .groupBy { it.artistName }
+                .entries
+                .filter { (name, _) -> name.isNotBlank() && name != "Unknown Artist" }
+                .take(12)
+                .mapIndexed { index, (name, artistSongs) ->
+                    BrowseArtist(
+                        // Address by name: the Browse All row navigates to a search for the artist,
+                        // so the name is the only identifier the destination needs.
+                        id = name,
+                        name = name,
+                        artworkUrl = artistSongs.firstOrNull()?.artworkUrl.orEmpty(),
+                        letter = name.first().uppercaseChar(),
+                    )
+                }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Log.e("CRANK_EXPLORE", "Failed to load artists: ${e.message}")
+            emptyList()
+        }
+    }
+
+    /** Gives each genre a real thumbnail by looking up one representative track. */
+    private suspend fun loadGenresWithArtwork(genreNames: List<String>): List<GenreItem> {
+        val withArt = genreNames.mapIndexed { index, name ->
+            val art = try {
+                musicRepository.search("$name music").firstOrNull()?.artworkUrl.orEmpty()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.d("CRANK_EXPLORE", "No artwork for genre $name: ${e.message}")
+                ""
+            }
+            GenreItem(id = Collection.genre(name), title = name, imageUrl = art)
+        }
+
+        // Also upgrade the featured playlist cards to real artwork now that we have a search path.
+        val featured = FEATURED_COLLECTIONS.mapNotNull { (collection, isHero) ->
+            try {
+                val songs = musicRepository.search(collection.query).take(4)
+                val art = songs.firstOrNull()?.artworkUrl.orEmpty()
+                FeaturedPlaylist(
+                    id = collection.slug,
+                    title = collection.title,
+                    description = collection.subtitle,
+                    artworkUrl = art,
+                    isHero = isHero,
+                )
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.d("CRANK_EXPLORE", "No artwork for ${collection.slug}: ${e.message}")
+                null
+            }
+        }
+        if (featured.isNotEmpty()) {
+            _uiState.update { it.copy(featuredPlaylists = featured) }
+        }
+
+        return withArt
     }
 
     private suspend fun loadTopCharts(): List<ChartItem> {
@@ -163,12 +260,19 @@ class ExploreViewModel @Inject constructor(
             chartSongs.mapIndexed { index, song ->
                 ChartItem(
                     song = song,
+                    // A real rank, derived from the order the search backend returned.
                     rank = index + 1,
-                    trend = if (index % 3 == 0) "up" else if (index % 5 == 0) "down" else "same",
-                    playCount = String.format("%,d", 1000000L - index * 100000L),
+                    // Trend and play count were both invented — arrows keyed off `index % 3` and
+                    // counts off `1_000_000L - index * 100_000L`. Neither number came from data, so
+                    // they are gone rather than shown as if they meant something. The chart is
+                    // ordered; that ordering is the only real signal available.
+                    trend = "",
+                    playCount = "",
                     duration = formatDuration(song.durationMs)
                 )
             }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             Log.e("CRANK_EXPLORE", "Failed to load charts: ${e.message}")
             emptyList()
@@ -184,13 +288,17 @@ class ExploreViewModel @Inject constructor(
                         id = song.albumId ?: song.id,
                         title = song.title,
                         artistName = song.artistName,
-                        releaseYear = "2024",
+                        // The search response does not carry a release year. "" means unknown; the
+                        // previous hardcoded "2024" asserted a date we had no evidence for.
+                        releaseYear = "",
                         artworkUrl = song.artworkUrl,
                         trackCount = 1
                     ),
-                    releaseDate = "2024"
+                    releaseDate = ""
                 )
             }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             Log.e("CRANK_EXPLORE", "Failed to load releases: ${e.message}")
             emptyList()
@@ -201,6 +309,8 @@ class ExploreViewModel @Inject constructor(
         return try {
             val trendingSongs = musicRepository.search("trending").take(4)
             trendingSongs.map { it.title }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             Log.e("CRANK_EXPLORE", "Failed to load trending: ${e.message}")
             emptyList()
@@ -219,12 +329,16 @@ class ExploreViewModel @Inject constructor(
                         SearchSuggestion(
                             id = song.id,
                             title = song.title,
-                            subtitle = "${song.artistName} • Song",
-                            type = "song",
+                            subtitle = "${song.artistName} • Song",                            type = "song",
                             imageUrl = song.artworkUrl
                         )
                     }
                     _uiState.value = _uiState.value.copy(searchSuggestions = suggestions)
+                } catch (e: CancellationException) {
+                    // Expected and routine: the user typed another character and this job was
+                    // replaced. Rethrow so the coroutine ends cleanly instead of continuing past
+                    // its cancellation point and logging a misleading failure.
+                    throw e
                 } catch (e: Exception) {
                     Log.e("CRANK_EXPLORE", "Search failed: ${e.message}")
                 }

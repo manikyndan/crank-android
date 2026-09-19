@@ -42,6 +42,7 @@ import com.crank.music.ui.theme.ObsidianBlack
 import com.crank.music.ui.theme.TextSecondary
 import com.crank.music.ui.theme.WarmWhite
 import com.crank.music.ui.viewmodel.LyricsState
+import com.crank.music.ui.viewmodel.LyricsTiming
 import com.crank.music.ui.viewmodel.PlayerViewModel
 
 @Composable
@@ -133,14 +134,28 @@ fun LyricsScreen(
 
                 is LyricsState.Success -> {
                     val lines = state.lines
-                    val currentProgress = playerState.progress
+                    val isSynced = state.timing == LyricsTiming.SYNCED
 
-                    val activeIndex = lines.indexOfLast { it.timestampMs <= currentProgress }.coerceAtLeast(0)
+                    // Only claim to know the current line when the timestamps are real. With
+                    // estimated timings they were spaced by an assumption about line length, so
+                    // highlighting one as "now playing" would assert something untrue — the
+                    // scroll position would be roughly right while the highlight was not.
+                    val currentProgress = playerState.progress
+                    val activeIndex =
+                        if (isSynced) {
+                            lines.indexOfLast { it.timestampMs <= currentProgress }
+                                .coerceAtLeast(0)
+                        } else {
+                            -1
+                        }
 
                     val lazyListState = rememberLazyListState()
 
+                    // `activeIndex` is -1 for estimated lyrics, and animateScrollToItem(-1)
+                    // throws. Skip the whole effect in that case rather than clamping, because
+                    // clamping to 0 would fight the user's own scrolling on every recomposition.
                     LaunchedEffect(activeIndex) {
-                        if (activeIndex >= 0 && lines.isNotEmpty()) {
+                        if (activeIndex > 0) {
                             lazyListState.animateScrollToItem((activeIndex - 2).coerceAtLeast(0))
                         }
                     }

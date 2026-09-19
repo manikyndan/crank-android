@@ -4,6 +4,7 @@ import android.util.Log
 import com.crank.music.data.remote.innertube.InnerTubeApi
 import com.crank.music.domain.model.Album
 import com.crank.music.domain.model.Song
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.schabi.newpipe.extractor.ServiceList
@@ -28,6 +29,8 @@ class YouTubeRemoteDataSource @Inject constructor(
             } else {
                 searchMusicFallback(query)
             }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             Log.e("CRANK_INTEGRATION", e.message ?: "InnerTube search error, trying fallback", e)
             searchMusicFallback(query)
@@ -52,12 +55,16 @@ class YouTubeRemoteDataSource @Inject constructor(
                         title = item.name ?: "Unknown Track",
                         artistName = item.uploaderName ?: "Unknown Artist",
                         albumId = null,
-                        durationMs = if (item.duration > 0) item.duration * 1000L else 180_000L,
+                        // 0 means "unknown" honestly; the UI decides how to render an unknown
+                        // duration. Inventing 3:00 here put a wrong length on screen.
+                        durationMs = if (item.duration > 0) item.duration * 1000L else 0L,
                         artworkUrl = item.thumbnails.lastOrNull()?.url ?: "",
                         isLocal = false,
                         streamUrl = videoId
                     )
                 }
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 Log.e("CRANK_INTEGRATION", e.message ?: "Fallback search failed", e)
                 emptyList()
@@ -73,6 +80,8 @@ class YouTubeRemoteDataSource @Inject constructor(
             } else {
                 getHomeDataFallback()
             }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             Log.e("CRANK_INTEGRATION", e.message ?: "InnerTube home error, trying fallback", e)
             getHomeDataFallback()
@@ -96,11 +105,15 @@ class YouTubeRemoteDataSource @Inject constructor(
                         id = browseId,
                         title = item.name ?: "Unknown Album",
                         artistName = item.uploaderName ?: "Various Artists",
-                        releaseYear = "2024",
+                        // The search extractor does not give us a release year. Empty string means
+                        // "not known"; hardcoding "2024" asserted a fact we never had.
+                        releaseYear = "",
                         artworkUrl = item.thumbnails.lastOrNull()?.url ?: "",
                         trackCount = item.streamCount.toInt()
                     )
                 }
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 Log.e("CRANK_INTEGRATION", e.message ?: "Fallback home failed", e)
                 emptyList()

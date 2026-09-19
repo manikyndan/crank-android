@@ -30,6 +30,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.crank.music.domain.model.Album
 import com.crank.music.domain.model.Song
 import com.crank.music.ui.components.AlbumCard
 import com.crank.music.ui.components.CategoryTabs
@@ -52,7 +53,7 @@ fun SearchScreen(
     isPlaying: Boolean = false,
     onSongSelect: (Song) -> Unit = {},
     onSongSelectWithContext: (Song, List<Song>) -> Unit = { song, _ -> onSongSelect(song) },
-    onAlbumClick: (String) -> Unit = {}
+    onAlbumClick: (Album) -> Unit = {}
 ) {
     val uiState by searchViewModel.uiState.collectAsState()
     val categories = listOf("All", "Songs", "Artists", "Albums")
@@ -153,7 +154,10 @@ fun SearchScreen(
                         AlbumCard(
                             album = album,
                             modifier = Modifier.fillMaxWidth(),
-                            onClick = { onAlbumClick(album.id) }
+                            // Pass the whole album: the destination resolves it by title and
+                            // artist, because an opaque album id is not something the search
+                            // backend can be queried with.
+                            onClick = { onAlbumClick(album) }
                         )
                     }
                 }

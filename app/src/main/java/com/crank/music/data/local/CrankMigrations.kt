@@ -108,9 +108,36 @@ val MIGRATION_3_4 = object : Migration(3, 4) {
     }
 }
 
+/**
+ * v4 → v5
+ *
+ * Adds `session_values`, a key/value table for session-scoped strings.
+ *
+ * First user is the YouTube visitor id, which the stream cascade needs and which must survive
+ * restarts. Stored here rather than in a new DataStore dependency so the app keeps exactly one
+ * persistence mechanism and one thing for "clear app data" to remove.
+ *
+ * Purely additive; no existing table is touched.
+ */
+val MIGRATION_4_5 = object : Migration(4, 5) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS `session_values` (
+                `key` TEXT NOT NULL,
+                `value` TEXT NOT NULL,
+                `updatedAt` INTEGER NOT NULL,
+                PRIMARY KEY(`key`)
+            )
+            """.trimIndent()
+        )
+    }
+}
+
 /** Every migration the database understands, in ascending order. */
 val CRANK_MIGRATIONS: Array<Migration> = arrayOf(
     MIGRATION_1_2,
     MIGRATION_2_3,
-    MIGRATION_3_4
+    MIGRATION_3_4,
+    MIGRATION_4_5
 )

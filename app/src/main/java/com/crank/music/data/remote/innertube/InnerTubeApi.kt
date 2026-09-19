@@ -24,6 +24,8 @@ class InnerTubeApi @Inject constructor(
     private val client: HttpClient,
     private val innerTubeConfig: InnerTubeConfig
 ) {
+    private val TAG = "CRANK_INNERTUBE"
+
     private val innerTubeContext = buildJsonObject {
         put("client", buildJsonObject {
             put("clientName", JsonPrimitive("WEB_REMIX"))
@@ -219,8 +221,68 @@ class InnerTubeApi @Inject constructor(
         }
     }
 
+    /**
+     * Fetches the lyrics YouTube Music holds for [videoId], or `null` when there are none.
+     *
+     * ## What was wrong before
+     *
+     * This method previously read `return null`. The parser below it —
+     * [extractLyricsFromBrowse] — was complete and correct, but nothing ever called it, so the
+     * lyrics tab was dead code and every track fell through to the LRCLIB path. That is the
+     * "lyrics never load" and "lyrics don't match the song" report, and no amount of work on the
+     * display side would have fixed it.
+     *
+     * ## The request
+     *
+     * YouTube Music exposes lyrics only through `browse`, not through `next` or `player`. The
+     * lyrics live under a tab whose browse id is derived from the track's video id: the ASCII
+     * codepoints are incremented by one and rendered as hex, then prefixed with `MPLYt`.
+     *
+     * That transform is stable and cheap, but it is not self-documenting — hence this note. A
+     * wrong suffix does not produce an error, it produces an empty response, which is
+     * indistinguishable from "this track has no lyrics".
+     *
+     * Returns `null` rather than throwing: a missing lyric is a normal state, not a failure, and
+     * the caller has a second source to fall back to.
+     */
     suspend fun fetchLyrics(videoId: String): String? {
-        return null
+        if (videoId.isBlank()) return null
+
+        return try {
+            val requestBody = buildJsonObject {
+                put("context", innerTubeContext)
+                put("browseId", JsonPrimitive(lyricsBrowseId(videoId)))
+            }
+
+            val response: JsonObject = client.post {
+                url(innerTubeConfig.withMusicKey("browse"))
+                contentType(ContentType.Application.Json)
+                setBody(requestBody)
+            }.body()
+
+            extractLyricsFromBrowse(response)?.takeIf { it.isNotBlank() }
+        } catch (e: Exception) {
+            // Logged at debug: a track without lyrics is the common case, and a warning per
+            // track would drown out real failures.
+            Log.d(TAG, "Lyrics unavailable for $videoId: ${e.javaClass.simpleName}: ${e.message}")
+            null
+        }
+    }
+
+    /**
+     * Derives the browse id of a track's lyrics tab from its video id.
+     *
+     * Each character is shifted up by one codepoint and hex-encoded, and the result is prefixed
+     * with `MPLYt`. This mirrors how YouTube Music builds the id internally; the shift is what
+     * prevents the plain video id from being usable directly.
+     */
+    private fun lyricsBrowseId(videoId: String): String {
+        val shifted = buildString {
+            for (char in videoId) {
+                append((char.code + 1).toString(16))
+            }
+        }
+        return "MPLYt$shifted"
     }
 
     private fun extractLyricsFromBrowse(response: JsonObject): String? {

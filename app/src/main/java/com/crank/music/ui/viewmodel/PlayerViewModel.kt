@@ -32,14 +32,20 @@ import kotlinx.coroutines.launch
 import java.util.concurrent.atomic.AtomicLong
 import javax.inject.Inject
 
-data class LyricsLine(
-    val timestampMs: Long,
-    val text: String
-)
-
+/**
+ * The lyrics for the current track.
+ *
+ * [Success.timing] carries whether the timestamps are real or estimated, so the display can
+ * avoid claiming to know the current line when it does not. See [LyricsTiming].
+ */
 sealed class LyricsState {
     object Loading : LyricsState()
-    data class Success(val lines: List<LyricsLine>) : LyricsState()
+
+    data class Success(
+        val lines: List<LyricsLine>,
+        val timing: LyricsTiming = LyricsTiming.SYNCED,
+    ) : LyricsState()
+
     object Unavailable : LyricsState()
 }
 
@@ -71,8 +77,25 @@ class PlayerViewModel @Inject constructor(
     private val _playerState = MutableStateFlow(PlayerState())
     val playerState: StateFlow<PlayerState> = _playerState.asStateFlow()
 
+    /**
+     * The upcoming songs, as shown on the queue screen.
+     *
+     * Mirrors [playQueue] rather than being the source of truth: keeping one authoritative object
+     * and publishing a view of it is what makes the queue impossible to desynchronise.
+     */
     private val _queue = MutableStateFlow<List<Song>>(emptyList())
     val queue: StateFlow<List<Song>> = _queue.asStateFlow()
+
+    /**
+     * Replaces the queue and republishes it.
+     *
+     * Every mutation goes through here. Assigning `playQueue` directly and forgetting to update
+     * `_queue` is the desynchronisation this method exists to make impossible.
+     */
+    private fun setQueue(updated: PlayQueue) {
+        playQueue = updated
+        _queue.value = updated.upNext
+    }
 
     private val _lyricsState = MutableStateFlow<LyricsState>(LyricsState.Loading)
     val lyricsState: StateFlow<LyricsState> = _lyricsState.asStateFlow()
@@ -92,16 +115,60 @@ class PlayerViewModel @Inject constructor(
     private val playRequestCounter = AtomicLong(0)
 
     /**
-     * The song we have already re-resolved once after a 403.
+     * Which song the user most recently asked to hear.
      *
-     * Guards against the retry itself failing and looping: without it, an
-     * upstream refusal (every client identity rejected) would re-resolve forever
-     * with a fresh CoroutineScope each time.
+     * ## Why this is not redundant with [playRequestCounter]
+     *
+     * [playRequestCounter] only guards the *error reporting* inside [playSong]: it stops a stale
+     * attempt from writing a error message, but it does nothing to stop a stale attempt from
+     * reaching the player. Resolution is the slow part — a cold cascade can take seconds, and
+     * the first caller to finish wins the `setMediaItem` call. Tap song A, tap song B a moment
+     * later, and A resolving second would play **A while the UI shows B**. That is the
+     * "wrong song plays" report.
+     *
+     * A monotonically increasing token is used rather than comparing song ids, because the same
+     * song can legitimately be requested twice; comparing ids would treat the second request as
+     * a duplicate of the first and let the older, slower resolve land.
+     *
+     * Written on the main thread (all play entry points are) and read inside coroutines, so it is
+     * `@Volatile` for visibility rather than for atomicity.
      */
-    private var retriedSongId: String? = null
+    @Volatile
+    private var activePlayToken = 0L
 
-    private var originalQueue = listOf<Song>()
-    private var shuffledIndices = mutableListOf<Int>()
+    /**
+     * Play-attempt tokens whose 403 retry has already been spent.
+     *
+     * ## Why not "the song id we already retried"
+     *
+     * A per-song-id guard looks correct but breaks repeat-one. The song never changes, so the id
+     * guard blocks the retry on the *second* loop of the same track — and repeat-one is exactly
+     * where an expiring URL is most likely to bite, because the track is held on screen far
+     * longer than one pass. Tracking the attempt token instead means each new play gets its own
+     * single retry, which is the intended budget.
+     *
+     * The set is bounded by clearing it whenever it grows past [MAX_RETRY_TOKENS]; stale tokens
+     * are worthless by then because the counter only moves forward.
+     */
+    private val failedRetryTokens = mutableSetOf<Long>()
+
+    /**
+     * The play-attempt token that the player's current error belongs to.
+     *
+     * Updated when media is handed to the player, so the retry guard can tell which attempt
+     * actually failed rather than guessing from state that may have moved on.
+     */
+    @Volatile
+    private var lastErrorToken = -1L
+
+    /**
+     * The queue, as a single object with stated invariants.
+     *
+     * Replaces the previous trio of `_queue` / `originalQueue` / `shuffledIndices`, which had to
+     * be kept consistent by hand at every call site and were not — see [PlayQueue] for the
+     * specific defects that caused.
+     */
+    private var playQueue = PlayQueue()
 
     private val playerListener = object : Player.Listener {
         override fun onIsPlayingChanged(isPlaying: Boolean) {
@@ -156,15 +223,40 @@ class PlayerViewModel @Inject constructor(
             // right response is one re-resolve, not a skip. Skipping is what the
             // user sees as "the app jumped to the next song for no reason".
             //
-            // Only retry once per track: if a freshly minted URL also fails, the
-            // problem is upstream and marching the user through every song in the
-            // queue would just hide it.
+            // The budget is per *attempt*, not per song id: with repeat-one, the same song is
+            // legitimately played over and over, and a per-id guard would let the retry fire
+            // again on every loop. The request token is bumped on each play, so the guard below
+            // tracks "have we already retried the attempt that is currently on the player".
             val song = _playerState.value.currentSong
-            if (song != null && isExpiredUrlError(error) && retriedSongId != song.id) {
-                retriedSongId = song.id
+            if (song != null && isExpiredUrlError(error) && failedRetryTokens.add(lastErrorToken)) {
                 Log.d("CRANK_PLAYER", "403 on '${song.title}' — re-resolving once")
                 viewModelScope.launch {
-                    resolveAndPlay(song, forceRefresh = true, reason = "stream URL expired")
+                    // A retry is still a fresh play attempt for supersede purposes, so it claims
+                    // a new token. Otherwise a resolve already in flight would be treated as
+                    // newer and this retry would be discarded — leaving the track dead.
+                    val token = playRequestCounter.incrementAndGet()
+                    activePlayToken = token
+                    _playerState.update { it.copy(isLoading = true) }
+                    try {
+                        resolveAndPlay(
+                            song,
+                            forceRefresh = true,
+                            reason = "stream URL expired",
+                            token = token,
+                        )
+                    } catch (e: Exception) {
+                        Log.e("CRANK_PLAYER", "Re-resolve failed for '${song.title}': ${e.message}")
+                        if (!isSuperseded(token)) {
+                            _playerState.update {
+                                it.copy(
+                                    isLoading = false,
+                                    errorMessage =
+                                        "Stream expired and could not be refreshed: " +
+                                            (e.message ?: "unknown error"),
+                                )
+                            }
+                        }
+                    }
                 }
                 return
             }
@@ -278,7 +370,7 @@ class PlayerViewModel @Inject constructor(
                 // Prefer the queue snapshot stored alongside the playback state,
                 // but fall back to the queue table when the ids no longer resolve
                 // (e.g. the song rows were pruned after the snapshot was written).
-                val queueIds = savedState.queueJson.split(",").filter { it.isNotBlank() }
+                val queueIds = decodeQueueIds(savedState.queueJson)
                 val queueSongs = queueIds.mapNotNull { id ->
                     val song = songDao.getSongById(id) ?: return@mapNotNull null
                     Song(
@@ -293,8 +385,7 @@ class PlayerViewModel @Inject constructor(
                     )
                 }
                 if (queueSongs.isNotEmpty()) {
-                    _queue.value = queueSongs
-                    originalQueue = queueSongs
+                    setQueue(PlayQueue().restored(queueSongs))
                 } else {
                     loadQueueFromRoom()
                 }
@@ -346,8 +437,7 @@ class PlayerViewModel @Inject constructor(
                             isLocal = false
                         )
                     }
-                    _queue.value = songs
-                    originalQueue = songs.toList()
+                    setQueue(PlayQueue().restored(songs))
                 }
             } catch (e: Exception) {
                 Log.e("CRANK_PLAYER", "Failed to load queue: ${e.message}")
@@ -415,7 +505,7 @@ class PlayerViewModel @Inject constructor(
                         songDurationMs = song.durationMs,
                         songStreamUrl = song.streamUrl,
                         positionMs = player.currentPosition.coerceAtLeast(0),
-                        queueJson = _queue.value.joinToString(",") { it.id },
+                        queueJson = encodeQueueIds(PlayQueue.persistableSongs(playQueue)),
                         repeatMode = player.repeatMode,
                         shuffleEnabled = player.shuffleModeEnabled
                     )
@@ -497,26 +587,64 @@ class PlayerViewModel @Inject constructor(
         return streamData.url.takeIf { it.isNotBlank() }
     }
 
-    /**
-     * Message shown when a recognised-but-unsourced track is played.
-     *
-     * Recognition returns metadata only — a title and an artist, with no audio
-     * attached. Saying so plainly, and pointing at the search box, is far more
-     * useful than the resolver exception this used to produce.
-     */
-    private fun unresolvedMessage(song: Song): String =
-        "This is a recognised track with no audio source yet. " +
-            "Search for \"${song.title}\" by ${song.artistName} to play it."
+    companion object {
+        /**
+         * How large [failedRetryTokens] may grow before it is cleared.
+         *
+         * Only a cap on memory. Tokens are monotonically increasing, so anything in the set is
+         * already stale by the time the set is this large and clearing costs nothing.
+         */
+        private const val MAX_RETRY_TOKENS = 64
+
+        /**
+         * Separator for the queue snapshot.
+         *
+         * A newline rather than a comma. Song ids can contain commas — Media3 and some upstream
+         * services use ids like `artist,track` — so a comma-joined snapshot splits into more
+         * segments than there were songs, and the extra segments resolve to nothing. The result
+         * is a queue that silently loses tracks across a restart. Newlines do not occur in ids.
+         */
+        private const val QUEUE_SEPARATOR = "\n"
+
+        /**
+         * Serialises the queue's song ids for the playback snapshot.
+         *
+         * Exposed for testing: this value round-trips through the database, and a separator that
+         * collides with the data is invisible until a user restarts the app and finds tracks
+         * missing.
+         */
+        fun encodeQueueIds(songs: List<Song>): String =
+            songs.joinToString(QUEUE_SEPARATOR) { it.id }
+
+        /**
+         * Reverses [encodeQueueIds], tolerating a snapshot written by an older build.
+         *
+         * The comma fallback exists because the previous version joined on commas: without it, a
+         * queue saved before the upgrade would be read as one unusable id. Such a snapshot is
+         * only accepted when it does not also contain separators, so a legitimately new snapshot
+         * whose ids happen to contain commas is never misread.
+         */
+        fun decodeQueueIds(snapshot: String): List<String> {
+            if (snapshot.isBlank()) return emptyList()
+
+            val separator =
+                if (snapshot.contains(QUEUE_SEPARATOR)) QUEUE_SEPARATOR else LEGACY_QUEUE_SEPARATOR
+
+            return snapshot.split(separator).filter { it.isNotBlank() }
+        }
+
+        /** The separator used by builds before the queue snapshot switched to newlines. */
+        private const val LEGACY_QUEUE_SEPARATOR = ","
+    }
 
     /**
-     * True when [error] looks like an expired/rejected stream URL rather than a
-     * genuinely broken track.
+     * True when [error] indicates the CDN rejected our signed media URL.
      *
-     * Matched on the message rather than the cause type on purpose: the 403 is
-     * wrapped several layers deep (`ExoPlaybackException` → `Source error` →
-     * `HttpDataSource$InvalidResponseCodeException`), and walking that chain
-     * couples this class to ExoPlayer's internal exception hierarchy. The
-     * message is stable across Media3 releases and is what the log shows.
+     * Matched on the message rather than the cause type on purpose: the 403 is wrapped several
+     * layers deep (`ExoPlaybackException` → `Source error` →
+     * `HttpDataSource$InvalidResponseCodeException`), and walking that chain couples this class
+     * to ExoPlayer's internal exception hierarchy. The message is stable across Media3 releases
+     * and is what the log shows.
      */
     private fun isExpiredUrlError(error: PlaybackException): Boolean {
         val text = generateSequence(error) { it.cause as? PlaybackException }
@@ -525,31 +653,72 @@ class PlayerViewModel @Inject constructor(
     }
 
     /**
+     * Message shown when a recognised-but-unsourced track is played.
+     *
+     * Recognition returns metadata only — a title and an artist, with no audio attached. Saying
+     * so plainly, and pointing at the search box, is far more useful than the resolver exception
+     * this used to produce.
+     */
+    private fun unresolvedMessage(song: Song): String =
+        "This is a recognised track with no audio source yet. " +
+            "Search for \"${song.title}\" by ${song.artistName} to play it."
+
+    /**
      * Resolves [song] and hands it to the player, reporting failures on the
      * player state.
      *
      * [forceRefresh] skips the "this URL still looks valid" shortcut, which is
      * what the 403-retry path needs: the URL just failed, so its own expiry
      * stamp cannot be trusted to tell us whether it works.
+     *
+     * ## The supersede check
+     *
+     * Resolution is slow and this method is called from several places. If the user asks for
+     * another song while this one is still resolving, the correct behaviour is to abandon this
+     * attempt silently — writing it to the player after the fact is what makes the app play a
+     * track the user did not choose. Every write below is therefore guarded on [token] still
+     * being the active request.
      */
     private suspend fun resolveAndPlay(
         song: Song,
         forceRefresh: Boolean = false,
-        reason: String = "play"
+        reason: String = "play",
+        token: Long = activePlayToken,
     ) {
         if (!song.isPlayable) {
             Log.d("CRANK_PLAYER", "Song '${song.title}' has no playable source (recognised only)")
+            if (isSuperseded(token)) return
             _playerState.update {
                 it.copy(isLoading = false, errorMessage = unresolvedMessage(song))
             }
             return
         }
 
-        val resolvedUrl = if (forceRefresh) {
-            val streamData = musicRepository.getSongStreamUrl(song.id, song.title, song.artistName)
-            streamData.url.takeIf { it.isNotBlank() }
-        } else {
-            resolvePlayableUrl(song)
+        val resolvedUrl = try {
+            if (forceRefresh) {
+                val streamData = musicRepository.getSongStreamUrl(song.id, song.title, song.artistName)
+                streamData.url.takeIf { it.isNotBlank() }
+            } else {
+                resolvePlayableUrl(song)
+            }
+        } catch (e: Exception) {
+            // Abandoning here rather than rethrowing: a superseded request that fails should
+            // not surface an error for a song the user has already moved on from.
+            if (isSuperseded(token)) {
+                Log.d("CRANK_PLAYER", "Abandoning failed resolve for '${song.title}' (superseded)")
+                return
+            }
+            throw e
+        }
+
+        // The resolve just cost us a network round trip; the user may have picked something else
+        // in the meantime. Stopping here is the whole point of the token.
+        if (isSuperseded(token)) {
+            Log.d(
+                "CRANK_PLAYER",
+                "Discarding resolved stream for '${song.title}': superseded by a newer request",
+            )
+            return
         }
 
         if (resolvedUrl == null) {
@@ -579,6 +748,9 @@ class PlayerViewModel @Inject constructor(
         player.prepare()
         player.play()
 
+        // Record which attempt is now on the player, so a later 403 can be attributed to it.
+        lastErrorToken = token
+
         _playerState.update {
             it.copy(
                 currentSong = song.copy(streamUrl = resolvedUrl),
@@ -590,11 +762,25 @@ class PlayerViewModel @Inject constructor(
         saveCurrentPlaybackPosition()
     }
 
+    /**
+     * True when a newer play request has been made since [token] was issued.
+     *
+     * @see activePlayToken
+     */
+    private fun isSuperseded(token: Long): Boolean = token != activePlayToken
+
     fun playSong(song: Song) {
         val requestId = playRequestCounter.incrementAndGet()
 
-        // A deliberate play means the previous 403-retry budget no longer applies.
-        retriedSongId = null
+        // Claim the play slot before doing anything slow. Any resolve still in flight for a
+        // previously requested song will see a different token and abandon itself.
+        val token = requestId
+        activePlayToken = token
+
+        // This attempt gets its own 403 retry, so the record of spent retries stays bounded
+        // rather than growing for the life of the process.
+        if (failedRetryTokens.size > MAX_RETRY_TOKENS) failedRetryTokens.clear()
+        failedRetryTokens.remove(token)
 
         if (historyIndex >= 0 && historyIndex < playHistory.size - 1) {
             playHistory.subList(historyIndex + 1, playHistory.size).clear()
@@ -606,10 +792,10 @@ class PlayerViewModel @Inject constructor(
             _playerState.update { it.copy(isLoading = true, errorMessage = null) }
 
             try {
-                resolveAndPlay(song)
+                resolveAndPlay(song, token = token)
             } catch (e: Exception) {
                 Log.e("CRANK_PLAYER", "Failed to play ${song.title} (${song.id}): ${e.message}", e)
-                if (requestId == playRequestCounter.get()) {
+                if (!isSuperseded(token)) {
                     _playerState.update {
                         it.copy(
                             isLoading = false,
@@ -621,32 +807,24 @@ class PlayerViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Starts [song] with [contextList] as the queue and repeat source.
+     *
+     * Note that the queue is built *before* playback starts, and includes songs that come before
+     * [song] in [contextList]. The old implementation dropped them (`contextList.drop(index + 1)`),
+     * which meant Previous could not reach a track the user had just skipped past — pressing
+     * Previous replayed the current song from the start instead.
+     */
     fun playSongWithContext(song: Song, contextList: List<Song>) {
-        originalQueue = contextList.toList()
-        if (_playerState.value.shuffleModeEnabled) {
-            buildShuffledQueue(contextList, song)
-        } else {
-            val songIndex = contextList.indexOfFirst { it.id == song.id }
-            if (songIndex >= 0) {
-                _queue.value = contextList.drop(songIndex + 1)
-            } else {
-                _queue.value = emptyList()
-            }
-        }
+        setQueue(
+            PlayQueue().fromContext(
+                currentSong = song,
+                contextList = contextList,
+                shuffle = _playerState.value.shuffleModeEnabled,
+            )
+        )
         saveQueueToRoom()
         playSong(song)
-    }
-
-    private fun buildShuffledQueue(songs: List<Song>, currentSong: Song) {
-        shuffledIndices = (songs.indices).toMutableList()
-        shuffledIndices.shuffle()
-        val currentIdx = songs.indexOfFirst { it.id == currentSong.id }
-        if (currentIdx >= 0) {
-            shuffledIndices.remove(currentIdx)
-            shuffledIndices.add(0, currentIdx)
-        }
-        val currentPos = shuffledIndices.indexOf(currentIdx)
-        _queue.value = shuffledIndices.drop(currentPos + 1).map { songs[it] }
     }
 
     fun toggleRepeatMode() {
@@ -660,26 +838,20 @@ class PlayerViewModel @Inject constructor(
         saveCurrentPlaybackPosition()
     }
 
+    /**
+     * Turns shuffle on or off, rebuilding the upcoming order from the context.
+     *
+     * The rebuild is delegated to [PlayQueue.reshuffled], which re-appends songs the user queued
+     * by hand. The previous implementation rebuilt from the context alone, so toggling shuffle
+     * discarded anything added with "add to queue" — the queue visibly shrank, with no message.
+     */
     fun toggleShuffle() {
         val nextShuffle = !_playerState.value.shuffleModeEnabled
         player.shuffleModeEnabled = nextShuffle
         _playerState.update { it.copy(shuffleModeEnabled = nextShuffle) }
 
         val currentSong = _playerState.value.currentSong ?: return
-        if (nextShuffle) {
-            if (originalQueue.isNotEmpty()) {
-                buildShuffledQueue(originalQueue, currentSong)
-            }
-        } else {
-            if (originalQueue.isNotEmpty()) {
-                val currentIdx = originalQueue.indexOfFirst { it.id == currentSong.id }
-                if (currentIdx >= 0) {
-                    _queue.value = originalQueue.drop(currentIdx + 1)
-                } else {
-                    _queue.value = emptyList()
-                }
-            }
-        }
+        setQueue(playQueue.reshuffled(currentSong, nextShuffle))
         saveQueueToRoom()
         saveCurrentPlaybackPosition()
     }
@@ -724,57 +896,61 @@ class PlayerViewModel @Inject constructor(
         _playerState.update { it.copy(sleepTimerMinutes = 0, remainingSleepTimeMs = 0L) }
     }
 
+    /**
+     * Appends [song] to the queue.
+     *
+     * Tracked as a manual addition so it survives a later shuffle toggle. The previous
+     * implementation overwrote `originalQueue` with the pending list, which meant a single
+     * hand-queued song silently *replaced* the album as the repeat-all source.
+     */
     fun addToQueue(song: Song) {
-        val updated = _queue.value + song
-        _queue.value = updated
-        originalQueue = updated
+        setQueue(playQueue.addManual(song))
         saveQueueToRoom()
     }
 
     fun removeFromQueue(index: Int) {
-        val current = _queue.value.toMutableList()
-        if (index in current.indices) {
-            current.removeAt(index)
-            _queue.value = current
-            originalQueue = current
-            saveQueueToRoom()
-        }
+        val updated = playQueue.removeAt(index)
+        if (updated == playQueue) return
+        setQueue(updated)
+        saveQueueToRoom()
+        saveCurrentPlaybackPosition()
     }
 
     fun reorderQueue(fromIndex: Int, toIndex: Int) {
-        val current = _queue.value.toMutableList()
-        if (fromIndex in current.indices && toIndex in current.indices) {
-            val item = current.removeAt(fromIndex)
-            current.add(toIndex, item)
-            _queue.value = current
-            originalQueue = current
-            saveQueueToRoom()
-        }
+        val updated = playQueue.move(fromIndex, toIndex)
+        if (updated == playQueue) return
+        setQueue(updated)
+        saveQueueToRoom()
     }
 
     fun clearQueue() {
-        _queue.value = emptyList()
-        originalQueue = emptyList()
+        setQueue(playQueue.cleared())
+        // No saveCurrentPlaybackPosition() here: the snapshot would immediately re-persist an
+        // empty queue alongside a still-playing track, and the restore path treats an empty
+        // snapshot as "no queue" and falls through to the table we just cleared.
         viewModelScope.launch { songDao.clearQueue() }
     }
 
     private fun saveQueueToRoom() {
+        val snapshot = playQueue
         viewModelScope.launch {
             try {
                 songDao.clearQueue()
-                val queue = _queue.value
-                val entities = queue.mapIndexed { index, song ->
-                    QueueItemEntity(
-                        songId = song.id,
-                        title = song.title,
-                        artistName = song.artistName,
-                        albumId = song.albumId,
-                        durationMs = song.durationMs,
-                        artworkUrl = song.artworkUrl,
-                        streamUrl = song.streamUrl,
-                        queueOrder = index
-                    )
-                }
+                // Persist only the head of the queue: the snapshot is rewritten on a timer, so
+                // the write must stay bounded regardless of how long the queue grows.
+                val entities =
+                    PlayQueue.persistableSongs(snapshot).mapIndexed { index, song ->
+                        QueueItemEntity(
+                            songId = song.id,
+                            title = song.title,
+                            artistName = song.artistName,
+                            albumId = song.albumId,
+                            durationMs = song.durationMs,
+                            artworkUrl = song.artworkUrl,
+                            streamUrl = song.streamUrl,
+                            queueOrder = index
+                        )
+                    }
                 if (entities.isNotEmpty()) {
                     songDao.insertQueueItems(entities)
                 }
@@ -801,17 +977,21 @@ class PlayerViewModel @Inject constructor(
                 return
             }
             Log.d("CRANK_PLAYER", "Play pressed with no media item; loading '${song.title}'")
+            val token = playRequestCounter.incrementAndGet()
+            activePlayToken = token
             viewModelScope.launch {
                 _playerState.update { it.copy(isLoading = true, errorMessage = null) }
                 try {
-                    resolveAndPlay(song, forceRefresh = true, reason = "Play")
+                    resolveAndPlay(song, forceRefresh = true, reason = "Play", token = token)
                 } catch (e: Exception) {
                     Log.e("CRANK_PLAYER", "Failed to start '${song.title}': ${e.message}")
-                    _playerState.update {
-                        it.copy(
-                            isLoading = false,
-                            errorMessage = "Failed to load: ${e.message ?: "Unknown error"}"
-                        )
+                    if (!isSuperseded(token)) {
+                        _playerState.update {
+                            it.copy(
+                                isLoading = false,
+                                errorMessage = "Failed to load: ${e.message ?: "Unknown error"}"
+                            )
+                        }
                     }
                 }
             }
@@ -833,14 +1013,27 @@ class PlayerViewModel @Inject constructor(
         if (playHistory.size > 1 && historyIndex > 0) {
             historyIndex--
             val prevSong = playHistory[historyIndex]
-            retriedSongId = null
+
+            // Claim the play slot, exactly as playSong does. Without this, a resolve still in
+            // flight for the track the user was on would win the race and overwrite the
+            // previous track — the same wrong-song defect, reached from the other direction.
+            val token = playRequestCounter.incrementAndGet()
+            activePlayToken = token
+
             viewModelScope.launch {
                 _playerState.update { it.copy(isLoading = true, errorMessage = null) }
                 try {
-                    resolveAndPlay(prevSong, reason = "Previous")
+                    resolveAndPlay(prevSong, reason = "Previous", token = token)
                 } catch (e: Exception) {
                     Log.e("CRANK_PLAYER", "Failed to play previous: ${e.message}")
-                    _playerState.update { it.copy(isLoading = false) }
+                    if (!isSuperseded(token)) {
+                        _playerState.update {
+                            it.copy(
+                                isLoading = false,
+                                errorMessage = "Failed to load: ${e.message ?: "Unknown error"}",
+                            )
+                        }
+                    }
                 }
             }
         } else {
@@ -848,34 +1041,56 @@ class PlayerViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Advances to the next track, wrapping for repeat-all.
+     *
+     * ## What was wrong
+     *
+     * The wrap branch set `_queue.value = originalQueue` and recursed. Because `originalQueue`
+     * was the context *including the track that had just finished*, the first song of the new
+     * pass was the one already playing — so repeat-all replayed the last track twice before
+     * moving on. When shuffle was on it recursed through `buildShuffledQueue` and could re-enter
+     * `playNext` with an empty queue, recursing until the stack ran out.
+     *
+     * Now the wrap is a single, non-recursive step: rebuild the upcoming list from the context
+     * with the current song excluded, then take its head. A `null` result means there is nothing
+     * to repeat, and playback stops rather than looping.
+     */
     fun playNext() {
-        val currentQueue = _queue.value
-        if (currentQueue.isNotEmpty()) {
-            val nextSong = currentQueue.first()
-            val remaining = currentQueue.drop(1)
-            _queue.value = remaining
+        val next = playQueue.peekNext()
+        if (next != null) {
+            setQueue(playQueue.dropFirst())
             saveQueueToRoom()
-            playSong(nextSong)
-        } else {
-            if (player.repeatMode == Player.REPEAT_MODE_ALL) {
-                val currentSong = _playerState.value.currentSong ?: return
-                if (originalQueue.isNotEmpty()) {
-                    if (_playerState.value.shuffleModeEnabled) {
-                        buildShuffledQueue(originalQueue, currentSong)
-                        val nextIdx = _queue.value.firstOrNull()
-                        if (nextIdx != null) {
-                            playNext()
-                        }
-                    } else {
-                        _queue.value = originalQueue
-                        saveQueueToRoom()
-                        playNext()
-                    }
-                }
-            } else {
-                _playerState.update { it.copy(isPlaying = false) }
-            }
+            playSong(next)
+            return
         }
+
+        if (player.repeatMode == Player.REPEAT_MODE_ALL) {
+            val currentSong = _playerState.value.currentSong
+            if (currentSong == null) {
+                Log.w("CRANK_PLAYER", "Repeat-all with no current song; stopping")
+                _playerState.update { it.copy(isPlaying = false) }
+                return
+            }
+
+            val wrapped =
+                playQueue.forRepeatAll(currentSong, _playerState.value.shuffleModeEnabled)
+
+            if (wrapped == null || wrapped.upNext.isEmpty()) {
+                // Nothing to wrap to — a context of one, or none at all. Stopping is correct;
+                // retrying would spin.
+                Log.d("CRANK_PLAYER", "Repeat-all with nothing to repeat; stopping")
+                _playerState.update { it.copy(isPlaying = false) }
+                return
+            }
+
+            setQueue(wrapped)
+            saveQueueToRoom()
+            playNext()
+            return
+        }
+
+        _playerState.update { it.copy(isPlaying = false) }
     }
 
     fun dismissError() {
@@ -898,64 +1113,120 @@ class PlayerViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Loads lyrics for [song].
+     *
+     * ## Why the result is checked before it is published
+     *
+     * Lyrics arrive over the network, so this is slow enough to lose a race. Skipping a track
+     * while the previous one is still fetching used to let the older response land last and
+     * replace the new track's lyrics — the visible symptom being lyrics that belong to the
+     * *previous* song. The guard below makes a stale response a no-op.
+     *
+     * The check is on the song identity rather than on a token, because here the thing that must
+     * match is simply "is this still the song on screen".
+     */
     private fun generateLyricsForSong(song: Song) {
         _lyricsState.value = LyricsState.Loading
         viewModelScope.launch {
             try {
                 val result = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                    fetchLyricsFromLRCLIB(song.title, song.artistName, song.durationMs / 1000)
+                    fetchLyricsFor(song)
                 }
-                if (result != null) {
-                    _lyricsState.value = LyricsState.Success(result)
-                } else {
-                    _lyricsState.value = LyricsState.Unavailable
+
+                // Discard anything that arrives after the user has moved on. Compared on id
+                // because the same track may be re-requested; a late response for the *same*
+                // song is still correct and harmless.
+                if (_playerState.value.currentSong?.id != song.id) {
+                    Log.d(
+                        "CRANK_LYRICS",
+                        "Discarding lyrics for '${song.title}': no longer the current track",
+                    )
+                    return@launch
                 }
+
+                _lyricsState.value =
+                    if (result != null) {
+                        LyricsState.Success(result.lines, result.timing)
+                    } else {
+                        LyricsState.Unavailable
+                    }
             } catch (e: Exception) {
                 Log.e("CRANK_PLAYER", "Lyrics fetch failed: ${e.message}")
-                _lyricsState.value = LyricsState.Unavailable
+                if (_playerState.value.currentSong?.id == song.id) {
+                    _lyricsState.value = LyricsState.Unavailable
+                }
             }
         }
     }
 
-    private suspend fun fetchLyricsFromLRCLIB(title: String, artist: String, durationSec: Long): List<LyricsLine>? {
-        return try {
-            val httpResponse = musicRepository.searchLyrics(title, artist)
-            if (httpResponse != null) {
-                val synced = httpResponse.syncedLyrics
-                if (!synced.isNullOrBlank()) {
-                    val lines = parseLRC(synced)
-                    if (lines.isNotEmpty()) return lines
+    /**
+     * Fetches lyrics for [song], trying the exact-match source before the fuzzy one.
+     *
+     * ## Why the order matters
+     *
+     * YouTube Music is asked by *track id*, so whatever comes back is for the song that is
+     * actually playing — it cannot mismatch. LRCLIB is asked by *title and artist*, which covers
+     * tracks YouTube Music has no lyrics for, but searches are fuzzy and can match a different
+     * recording: a live version, a cover, or a same-titled song. That is how lyrics for the
+     * wrong track reach the screen.
+     *
+     * So the exact source is tried first and the fuzzy one only as a fallback. The previous
+     * order was forced: the YouTube Music path was a stub returning `null`, so every track went
+     * to LRCLIB and the mismatch was guaranteed rather than occasional.
+     *
+     * Parsing is delegated to [LyricsParser], which handles the LRC shapes the previous inline
+     * regex silently dropped. See that class for the specific cases.
+     */
+    private suspend fun fetchLyricsFor(song: Song): ParsedLyrics? {
+        // Exact source: needs a video id. A recognised-only track (and any track whose id is not
+        // a YouTube id) has none, and asking would produce a browse id that resolves to nothing.
+        if (song.id.isNotBlank() && song.isPlayable && !song.id.startsWith("http")) {
+            val raw =
+                try {
+                    musicRepository.getLyricsByVideoId(song.id)
+                } catch (e: Exception) {
+                    Log.d("CRANK_LYRICS", "YouTube Music lyrics unavailable for '${song.title}'")
+                    null
                 }
-                val plain = httpResponse.plainLyrics
-                if (!plain.isNullOrBlank()) {
-                    val lines = plain.lines()
-                        .filter { it.isNotBlank() }
-                        .mapIndexed { index, line -> LyricsLine(index * 4000L, line.trim()) }
-                    if (lines.isNotEmpty()) return lines
-                }
+
+            if (!raw.isNullOrBlank()) {
+                // YouTube Music returns timestamped LRC when it has it, and plain text otherwise.
+                // The parser handles both, so there is no separate plain-text branch here — that
+                // duplication was how the two paths could disagree about timing.
+                val parsed = LyricsParser.parse(raw, song.durationMs)
+                if (!parsed.isEmpty) return parsed
             }
+        }
+
+        return fetchLyricsFromLRCLIB(song.title, song.artistName, song.durationMs)
+    }
+
+    private suspend fun fetchLyricsFromLRCLIB(
+        title: String,
+        artist: String,
+        durationMs: Long,
+    ): ParsedLyrics? {
+        return try {
+            val httpResponse = musicRepository.searchLyrics(title, artist) ?: return null
+
+            // Synced lyrics first: real timings beat estimated ones.
+            val synced = httpResponse.syncedLyrics
+            if (!synced.isNullOrBlank()) {
+                val parsed = LyricsParser.parse(synced, durationMs)
+                if (!parsed.isEmpty) return parsed
+            }
+
+            val plain = httpResponse.plainLyrics
+            if (!plain.isNullOrBlank()) {
+                val parsed = LyricsParser.parse(plain, durationMs)
+                if (!parsed.isEmpty) return parsed
+            }
+
             null
         } catch (e: Exception) {
             Log.e("CRANK_LYRICS", "LRCLIB failed for '$title': ${e.message}")
             null
-        }
-    }
-
-    private fun parseLRC(lrc: String): List<LyricsLine> {
-        val regex = Regex("""\[(\d{2}):(\d{2})\.(\d{2,3})\](.*)""")
-        return lrc.lines().mapNotNull { line ->
-            val match = regex.matchEntire(line.trim()) ?: return@mapNotNull null
-            val minutes = match.groupValues[1].toLongOrNull() ?: return@mapNotNull null
-            val seconds = match.groupValues[2].toLongOrNull() ?: return@mapNotNull null
-            val centis = match.groupValues[3].let {
-                if (it.length == 2) it.toLongOrNull()!! * 10 else it.toLongOrNull()!!
-            }
-            val text = match.groupValues[4].trim()
-            if (text.isBlank()) return@mapNotNull null
-            LyricsLine(
-                timestampMs = minutes * 60_000 + seconds * 1_000 + centis * 10,
-                text = text
-            )
         }
     }
 

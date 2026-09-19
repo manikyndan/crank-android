@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.crank.music.data.local.HistoryEntity
 import com.crank.music.data.local.SongDao
+import com.crank.music.domain.model.Collection
 import com.crank.music.domain.model.Song
 import com.crank.music.domain.repository.MusicRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -35,7 +36,8 @@ data class TrendingItem(
 data class HomeQuickAction(
     val id: String,
     val label: String,
-    val icon: String
+    val icon: String,
+    val rank: Int = 0,
 )
 
 data class MadeForYouPlaylist(
@@ -55,6 +57,38 @@ data class HomeUiState(
     val quickActions: List<HomeQuickAction> = emptyList(),
     val madeForYou: List<MadeForYouPlaylist> = emptyList(),
     val profileImageUrl: String = ""
+)
+
+/** Pairs a collection with the glyph its quick-action chip shows. */
+private data class QuickActionChipSpec(val collection: Collection, val icon: String)
+
+/**
+ * The made-for-you row, in display order. Each entry is a real [Collection], so the id that opens
+ * it and the label shown for it are guaranteed to agree.
+ */
+private val MADE_FOR_YOU = listOf(
+    Collection.DISCOVER_WEEKLY,
+    Collection.RELEASE_RADAR,
+    Collection.DAILY_MIX_1,
+    Collection.TIME_CAPSULE,
+    Collection.ON_REPEAT,
+    Collection.REPEAT_REWIND,
+)
+
+/**
+ * Artwork tint per collection. This is presentation, so it legitimately lives near the UI. It is
+ * keyed by [Collection] rather than by a bare string, so a new collection cannot silently render
+ * with the wrong colour.
+ */
+private val MADE_FOR_YOU_COLORS = mapOf(
+    Collection.DISCOVER_WEEKLY to 0xFF6B3FA0,
+    Collection.RELEASE_RADAR to 0xFF1DB954,
+    Collection.DAILY_MIX_1 to 0xFFE8115B,
+    Collection.DAILY_MIX_2 to 0xFF2E77D0,
+    Collection.DAILY_MIX_3 to 0xFFE13300,
+    Collection.TIME_CAPSULE to 0xFFE13300,
+    Collection.ON_REPEAT to 0xFF1E3264,
+    Collection.REPEAT_REWIND to 0xFF8D67AB,
 )
 
 @HiltViewModel
@@ -124,15 +158,22 @@ class HomeViewModel @Inject constructor(
                     emptyList()
                 }
 
-                // Made for you playlists
-                val madeForYou = listOf(
-                    MadeForYouPlaylist("dw", "Discover Weekly", "Fresh picks for you", 0xFF6B3FA0, "Updated weekly"),
-                    MadeForYouPlaylist("rr", "Release Radar", "New releases you'll love", 0xFF1DB954, "Updated daily"),
-                    MadeForYouPlaylist("dm1", "Daily Mix 1", "Pop & Charts", 0xFFE8115B, "Updated daily"),
-                    MadeForYouPlaylist("tc", "Time Capsule", "Your nostalgic favorites", 0xFFE13300, "Updated weekly"),
-                    MadeForYouPlaylist("or", "On Repeat", "Songs you can't stop playing", 0xFF1E3264, "Updated daily"),
-                    MadeForYouPlaylist("rrw", "Repeat Rewind", "Your past favorites", 0xFF8D67AB, "Updated weekly")
-                )
+                // Made for you playlists.
+                //
+                // These previously carried invented ids ("dw", "dm1", …) that the destination
+                // could not resolve, so every one of them opened the same generic search results.
+                // They are now addressed by Collection.slug, the single vocabulary shared with
+                // PlaylistDetailViewModel. The labels come from the enum too, so a collection's
+                // title cannot drift out of sync with the id that opens it.
+                val madeForYou = MADE_FOR_YOU.map { collection ->
+                    MadeForYouPlaylist(
+                        id = collection.slug,
+                        title = collection.title,
+                        subtitle = collection.subtitle,
+                        artworkColor = MADE_FOR_YOU_COLORS.getValue(collection),
+                        lastUpdated = if (collection == Collection.RELEASE_RADAR) "Updated daily" else "Updated weekly",
+                    )
+                }
 
                 _uiState.value = HomeUiState(
                     greeting = greeting,
@@ -140,11 +181,14 @@ class HomeViewModel @Inject constructor(
                     recommended = recommendedSongs.mapIndexed { index, song ->
                         RecommendedItem(
                             song = song,
+                            // "Because you listened to X" claims a real listening relationship we
+                            // have not established for every row. Keep the phrasing honest: this
+                            // is a search result for a taste query, not a personalisation claim.
                             reason = when (index % 4) {
-                                0 -> "Because you listened to ${song.artistName}"
+                                0 -> "Similar to ${song.artistName}"
                                 1 -> "Based on your taste"
-                                2 -> "Popular in your area"
-                                3 -> "Similar to your library"
+                                2 -> "Popular right now"
+                                3 -> "You might like this"
                                 else -> "Trending now"
                             }
                         )
@@ -153,17 +197,30 @@ class HomeViewModel @Inject constructor(
                         TrendingItem(
                             song = song,
                             rank = index + 1,
-                            trend = if (index % 3 == 0) "up" else if (index % 5 == 0) "down" else "same"
+                            // The direction arrow was decided by `index % 3` — pure decoration
+                            // dressed up as chart movement. The backend does not tell us whether a
+                            // track is climbing, so we no longer imply that it does.
+                            trend = ""
                         )
                     },
+                    // Quick action chips. These were literals with no destination at all — the
+                    // click handler only played a haptic tick. They now carry a Collection slug so
+                    // the same navigation contract applies to them as to every other card.
                     quickActions = listOf(
-                        HomeQuickAction("1", "Daily Mix 1", "mix"),
-                        HomeQuickAction("2", "Daily Mix 2", "mix"),
-                        HomeQuickAction("3", "Daily Mix 3", "mix"),
-                        HomeQuickAction("4", "On Repeat", "repeat"),
-                        HomeQuickAction("5", "Time Capsule", "time"),
-                        HomeQuickAction("6", "Discovery", "discover")
-                    ),
+                        QuickActionChipSpec(Collection.DAILY_MIX_1, "mix"),
+                        QuickActionChipSpec(Collection.DAILY_MIX_2, "mix"),
+                        QuickActionChipSpec(Collection.DAILY_MIX_3, "mix"),
+                        QuickActionChipSpec(Collection.ON_REPEAT, "repeat"),
+                        QuickActionChipSpec(Collection.TIME_CAPSULE, "time"),
+                        QuickActionChipSpec(Collection.DISCOVER_WEEKLY, "discover"),
+                    ).mapIndexed { index, action ->
+                        HomeQuickAction(
+                            id = action.collection.slug,
+                            label = action.collection.title,
+                            icon = action.icon,
+                            rank = index,
+                        )
+                    },
                     madeForYou = madeForYou,
                     isLoading = false
                 )

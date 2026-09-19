@@ -72,6 +72,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import coil3.compose.AsyncImage
+import com.crank.music.domain.model.Collection
 import com.crank.music.domain.model.Song
 import com.crank.music.ui.components.NotificationPanel
 import com.crank.music.ui.theme.ChampagneGold
@@ -94,7 +95,9 @@ fun HomeScreen(
     notificationViewModel: NotificationViewModel = hiltViewModel(),
     onSongSelect: (Song) -> Unit = {},
     onSongSelectWithContext: (Song, List<Song>) -> Unit = { song, _ -> onSongSelect(song) },
-    onPlaylistClick: (String) -> Unit = {}
+    onPlaylistClick: (String) -> Unit = {},
+    /** Opens the profile/You tab. Was previously a haptic tick with no destination. */
+    onProfileClick: () -> Unit = {}
 ) {
     val uiState by homeViewModel.uiState.collectAsState()
     val notifState by notificationViewModel.uiState.collectAsState()
@@ -119,6 +122,7 @@ fun HomeScreen(
                 },
                 onProfileClick = {
                     view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+                    onProfileClick()
                 }
             )
         }
@@ -133,14 +137,20 @@ fun HomeScreen(
                     items = uiState.recentlyPlayed,
                     onSongSelect = onSongSelect,
                     onSongSelectWithContext = onSongSelectWithContext,
-                    onSeeAllClick = { onPlaylistClick("recently_played") }
+                    onSeeAllClick = { onPlaylistClick(Collection.RECENTLY_PLAYED.slug) }
                 )
             }
 
             item {
                 QuickActionsRow(
                     actions = uiState.quickActions,
-                    onActionClick = { view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY) }
+                    // Was a bare haptic tick with no navigation, so the Daily Mix chips were
+                    // buttons that buzzed and did nothing. Each chip now carries its Collection
+                    // slug and opens that collection.
+                    onActionClick = { action ->
+                        view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+                        onPlaylistClick(action.id)
+                    }
                 )
             }
 
@@ -157,7 +167,7 @@ fun HomeScreen(
                         homeViewModel.refreshRecommendations()
                         view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
                     },
-                    onSeeAllClick = { onPlaylistClick("recommended") }
+                    onSeeAllClick = { onPlaylistClick(Collection.RECOMMENDED.slug) }
                 )
             }
 
@@ -166,7 +176,7 @@ fun HomeScreen(
                     items = uiState.trending,
                     onSongSelect = onSongSelect,
                     onSongSelectWithContext = onSongSelectWithContext,
-                    onSeeAllClick = { onPlaylistClick("trending") }
+                    onSeeAllClick = { onPlaylistClick(Collection.TRENDING.slug) }
                 )
             }
 
@@ -176,7 +186,7 @@ fun HomeScreen(
                     onPlaylistClick = { playlistId ->
                         onPlaylistClick(playlistId)
                     },
-                    onSeeAllClick = { onPlaylistClick("made_for_you") }
+                    onSeeAllClick = { onPlaylistClick(Collection.DISCOVER_WEEKLY.slug) }
                 )
             }
         }
@@ -397,7 +407,7 @@ private fun RecentlyPlayedCard(
 @Composable
 private fun QuickActionsRow(
     actions: List<com.crank.music.ui.viewmodel.HomeQuickAction>,
-    onActionClick: () -> Unit
+    onActionClick: (com.crank.music.ui.viewmodel.HomeQuickAction) -> Unit
 ) {
     Column(modifier = Modifier.padding(top = 20.dp)) {
         LazyRow(
@@ -407,7 +417,7 @@ private fun QuickActionsRow(
             items(actions) { action ->
                 QuickActionChip(
                     action = action,
-                    onClick = onActionClick
+                    onClick = { onActionClick(action) }
                 )
             }
         }
@@ -657,20 +667,24 @@ private fun TrendingRow(
             )
         }
 
-        Icon(
-            imageVector = when (item.trend) {
-                "up" -> Icons.AutoMirrored.Filled.TrendingUp
-                "down" -> Icons.AutoMirrored.Filled.TrendingDown
-                else -> Icons.AutoMirrored.Filled.TrendingUp
-            },
-            contentDescription = null,
-            tint = when (item.trend) {
-                "up" -> Color(0xFF4CAF50)
-                "down" -> Color(0xFFFF5252)
-                else -> TextTertiary
-            },
-            modifier = Modifier.size(18.dp)
-        )
+        // Only show a direction arrow when we actually know the direction. The previous `else`
+        // branch drew an upward arrow for unknown data, which asserted movement the backend never
+        // reported. An empty string now renders nothing.
+        if (item.trend.isNotEmpty()) {
+            Icon(
+                imageVector = when (item.trend) {
+                    "down" -> Icons.AutoMirrored.Filled.TrendingDown
+                    else -> Icons.AutoMirrored.Filled.TrendingUp
+                },
+                contentDescription = null,
+                tint = when (item.trend) {
+                    "up" -> Color(0xFF4CAF50)
+                    "down" -> Color(0xFFFF5252)
+                    else -> TextTertiary
+                },
+                modifier = Modifier.size(18.dp)
+            )
+        }
     }
 }
 
