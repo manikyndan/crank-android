@@ -20,7 +20,7 @@ object YouTubeClients {
     val WEB =
         YouTubeClient(
             clientName = "WEB",
-            clientVersion = "2.20260213.00.00",
+            clientVersion = "2.20260708.00.00",
             clientId = "1",
             userAgent = YouTubeClient.USER_AGENT_WEB,
         )
@@ -35,7 +35,7 @@ object YouTubeClients {
     val WEB_REMIX =
         YouTubeClient(
             clientName = "WEB_REMIX",
-            clientVersion = "1.20260213.01.00",
+            clientVersion = "1.20260707.12.00",
             clientId = "67",
             userAgent = YouTubeClient.USER_AGENT_WEB,
             loginSupported = true,
@@ -55,7 +55,7 @@ object YouTubeClients {
     val WEB_CREATOR =
         YouTubeClient(
             clientName = "WEB_CREATOR",
-            clientVersion = "1.20260213.00.00",
+            clientVersion = "1.20260707.00.00",
             clientId = "62",
             userAgent = YouTubeClient.USER_AGENT_WEB,
             loginSupported = true,
@@ -71,7 +71,7 @@ object YouTubeClients {
     val TVHTML5 =
         YouTubeClient(
             clientName = "TVHTML5",
-            clientVersion = "7.20260213.00.00",
+            clientVersion = "7.20260707.07.00",
             clientId = "7",
             userAgent =
                 "Mozilla/5.0(SMART-TV; Linux; Tizen 4.0.0.2) AppleWebkit/605.1.15 (KHTML, like Gecko) SamsungBrowser/9.2 TV Safari/605.1.15",
@@ -155,7 +155,7 @@ object YouTubeClients {
     val VISIONOS =
         YouTubeClient(
             clientName = "VISIONOS",
-            clientVersion = "0.1",
+            clientVersion = "1.02",
             clientId = "101",
             userAgent =
                 "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15",
@@ -172,9 +172,9 @@ object YouTubeClients {
     val IOS =
         YouTubeClient(
             clientName = "IOS",
-            clientVersion = "21.03.1",
+            clientVersion = "21.26.4",
             clientId = "5",
-            userAgent = "com.google.ios.youtube/21.03.1 (iPhone16,2; U; CPU iOS 18_2 like Mac OS X;)",
+            userAgent = "com.google.ios.youtube/21.26.4 (iPhone16,2; U; CPU iOS 18_2 like Mac OS X;)",
             osVersion = "18.2.22C152",
         )
 
@@ -186,10 +186,10 @@ object YouTubeClients {
     val IPADOS =
         YouTubeClient(
             clientName = "IOS",
-            clientVersion = "21.03.3",
+            clientVersion = "21.26.4",
             clientId = "5",
             userAgent =
-                "com.google.ios.youtube/21.03.3 (iPad7,6; U; CPU iPadOS 17_7_10 like Mac OS X; en-US)",
+                "com.google.ios.youtube/21.26.4 (iPad7,6; U; CPU iPadOS 17_7_10 like Mac OS X; en-US)",
             osName = "iPadOS",
             osVersion = "17.7.10.21H450",
             deviceMake = "Apple",

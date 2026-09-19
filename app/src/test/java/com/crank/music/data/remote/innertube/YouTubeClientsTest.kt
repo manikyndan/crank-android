@@ -109,11 +109,18 @@ class YouTubeClientsTest {
     }
 
     @Test
-    fun `every fallback client has a distinct identity`() {
-        // Duplicates would mean a client is tried twice, wasting a round trip, while another is
-        // never tried at all.
-        val identities = YouTubeClients.fallbackChain.map { it.clientName to it.clientVersion }
-        assertEquals(identities.size, identities.toSet().size)
+    fun `every fallback client appears at most once`() {
+        // The real invariant: no client *object* is listed twice in the chain. A duplicate would
+        // mean a client is tried twice, wasting a round trip, while another is never tried at all.
+        //
+        // The key is object identity, not (clientName, clientVersion): IOS and IPADOS are distinct
+        // clients with different device/user-agent fields but share both name and version because
+        // iPad *is* an iOS client. They are different objects and must both be present.
+        assertEquals(
+            "a client object is listed more than once in the chain",
+            YouTubeClients.fallbackChain.size,
+            YouTubeClients.fallbackChain.toSet().size,
+        )
     }
 
     @Test
