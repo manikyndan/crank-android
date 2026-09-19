@@ -30,6 +30,22 @@ jobs:
       - name: Build with Gradle
         run: ./gradlew assembleDebug assembleRelease
 
+      # Room exports its schema to app/schemas on every build that changes the
+      # database. Those files are the record that migrations are verified
+      # against, so an uncommitted one means the checked-in migration tests no
+      # longer describe the real schema. Fail instead of silently drifting.
+      - name: Check Room schemas are committed
+        shell: bash
+        run: |
+          if [ -n "$(git status --porcelain app/schemas)" ]; then
+            echo "::error::app/schemas changed during the build but was not committed."
+            git status --porcelain app/schemas
+            git diff -- app/schemas | head -50
+            echo "Commit the updated schema alongside the entity change."
+            exit 1
+          fi
+          echo "Room schemas are in sync."
+
       # Run the JVM unit tests. Without this step a change that breaks the pure
       # logic (the stream-URL expiry rules, for example) still produces a green
       # check, because assembleDebug does not compile or execute src/test.
