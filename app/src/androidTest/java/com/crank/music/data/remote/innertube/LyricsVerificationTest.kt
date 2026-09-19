@@ -2,12 +2,14 @@ package com.crank.music.data.remote.innertube
 
 import android.util.Log
 import com.crank.music.data.remote.lrclib.LrclibLyricsSource
+import com.crank.music.ui.viewmodel.LyricsParser
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.android.Android
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.serialization.kotlinx.json.json
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -61,6 +63,7 @@ class LyricsVerificationTest {
         var youtubeHits = 0
         var lrclibHits = 0
         var resolved = 0
+        var parsed = 0
 
         for (song in sample) {
             // Stage 1 — exact match, asked by the id of the track that is actually playing.
@@ -81,14 +84,24 @@ class LyricsVerificationTest {
             val lyrics = youtube?.takeIf { it.isNotBlank() } ?: fallback
             if (!lyrics.isNullOrBlank()) resolved++ else Log.e(TAG, "  UNRESOLVED '${song.title}'")
 
+            // Fetching text is only half the job: the player discards anything the parser turns
+            // into zero lines, so lyrics that resolve here but parse empty still show as
+            // "unavailable" on screen. Asserting both is what actually closes the symptom.
+            val lines = lyrics?.let { LyricsParser.parse(it, song.durationMs) }
+            if (lines != null && !lines.isEmpty) parsed++
+            if (!lyrics.isNullOrBlank() && (lines == null || lines.isEmpty)) {
+                Log.e(TAG, "  PARSED EMPTY '${song.title}' (${lyrics.length} chars)!")
+            }
+
             Log.i(
                 TAG,
-                "  '${song.title}' -> ${lyrics?.length ?: 0} chars " +
+                "  '${song.title}' -> ${lyrics?.length ?: 0} chars / " +
+                    "${lines?.lines?.size ?: 0} lines (${lines?.timing}) " +
                     "(youtube=${youtube?.length ?: 0}, lrclib=${fallback?.length ?: 0})",
             )
         }
 
-        Log.i(TAG, "RESOLVED=$resolved/${sample.size} youtubeOnly=$youtubeHits lrclibCovered=$lrclibHits")
+        Log.i(TAG, "RESOLVED=$resolved/${sample.size} youtubeOnly=$youtubeHits lrclibCovered=$lrclibHits parsed=$parsed")
 
         // The bar is deliberately on the *combined* chain: YouTube Music alone covers ~1 in 10 of
         // these tracks, so requiring it would pass while the user still saw nothing. Equally, a
@@ -97,6 +110,15 @@ class LyricsVerificationTest {
             "lyrics must resolve for most real feed tracks (got $resolved/${sample.size}) — " +
                 "a low number means the fallback is failing and tracks show 'lyrics unavailable'",
             resolved * 10 >= sample.size * 5,
+        )
+
+        // Every resolved track must survive parsing, or the screen still shows "unavailable"
+        // for a track whose lyrics we successfully fetched.
+        assertEquals(
+            "lyrics that resolve must also parse into lines (got $parsed of $resolved resolved) — " +
+                "a parse that yields zero lines is indistinguishable from having no lyrics",
+            resolved,
+            parsed,
         )
 
         // Control: a track both sources are known to have, so neither assertion can pass
