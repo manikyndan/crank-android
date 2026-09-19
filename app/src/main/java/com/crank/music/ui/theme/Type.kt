@@ -7,11 +7,26 @@ import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 
 // ═══════════════════════════════════════════════════════════════
-// CRANK TYPOGRAPHY — MIDNIGHT GOLD
-// Headings: Elegant Serif | Body: Clean Sans-Serif
+// CRANK TYPOGRAPHY
+//
+// Retargeted from a serif-display / sans-body pairing to a single
+// bold sans scale.
+//
+// The old headings were `FontFamily.Serif` (Playfair Display by
+// intent, but the platform serif in practice, since no font file was
+// ever bundled). A serif display face reads as editorial/luxury; a
+// music player wants the opposite — heavy, tight, plain sans that
+// lets the artwork carry the character. So display styles are now
+// the default sans at a heavier weight and negative tracking, which
+// is what makes a title read as deliberate rather than merely large.
+//
+// The two `val`s are kept because DesignTokens and several screens
+// reference them by name. `PlayfairDisplay` now resolves to the
+// sans family, so any screen still asking for it gets the new voice
+// without being edited.
 // ═══════════════════════════════════════════════════════════════
 
-val PlayfairDisplay = androidx.compose.ui.text.font.FontFamily.Serif
+val PlayfairDisplay = androidx.compose.ui.text.font.FontFamily.Default
 val InterFont = androidx.compose.ui.text.font.FontFamily.Default
 
 val CrankTypography = Typography(
@@ -24,8 +39,9 @@ val CrankTypography = Typography(
     titleLarge = CrankTokens.H3,
     titleMedium = TextStyle(
         fontFamily = InterFont,
-        fontWeight = FontWeight.Medium,
-        fontSize = 16.sp
+        fontWeight = FontWeight.SemiBold,
+        fontSize = 16.sp,
+        letterSpacing = (-0.01).em
     ),
     titleSmall = TextStyle(
         fontFamily = InterFont,
@@ -40,7 +56,7 @@ val CrankTypography = Typography(
     labelSmall = TextStyle(
         fontFamily = InterFont,
         fontWeight = FontWeight.Medium,
-        fontSize = 10.sp,
-        letterSpacing = 0.05.em
+        fontSize = 11.sp,
+        letterSpacing = 0.02.em
     )
 )

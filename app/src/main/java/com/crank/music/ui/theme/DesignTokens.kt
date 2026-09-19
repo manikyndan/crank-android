@@ -59,23 +59,27 @@ object CrankAnimation {
 }
 
 // ─── Typography Tokens ───
+// Display sizes are larger and heavier than before, with negative
+// tracking. That combination is what separates a screen title from
+// body text at a glance; adding size alone just looks zoomed in.
 object CrankTokens {
     val H1 = TextStyle(
-        fontFamily = PlayfairDisplay,
+        fontFamily = InterFont,
         fontWeight = FontWeight.Bold,
-        fontSize = 32.sp,
-        letterSpacing = (-0.02).em
+        fontSize = 34.sp,
+        letterSpacing = (-0.03).em
     )
     val H2 = TextStyle(
-        fontFamily = PlayfairDisplay,
+        fontFamily = InterFont,
         fontWeight = FontWeight.Bold,
-        fontSize = 24.sp,
-        letterSpacing = (-0.01).em
+        fontSize = 26.sp,
+        letterSpacing = (-0.02).em
     )
     val H3 = TextStyle(
-        fontFamily = PlayfairDisplay,
+        fontFamily = InterFont,
         fontWeight = FontWeight.SemiBold,
-        fontSize = 20.sp
+        fontSize = 20.sp,
+        letterSpacing = (-0.01).em
     )
     val BodyLarge = TextStyle(
         fontFamily = InterFont,

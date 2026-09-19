@@ -2,10 +2,13 @@ package com.crank.music.ui.viewmodel
 
 import androidx.compose.ui.graphics.Color
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import com.crank.music.ui.theme.ThemePreference
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 enum class ThemeMode(val label: String) {
@@ -36,8 +39,8 @@ enum class TypographyScale(val label: String) {
 
 data class AppearanceUiState(
     val themeMode: ThemeMode = ThemeMode.DARK,
-    val accentColor: Color = Color(0xFFFFD700),
-    val accentColorName: String = "Gold",
+    val accentColor: Color = Color(0xFFFA2D48),
+    val accentColorName: String = "Red",
     val isDynamicMaterialYou: Boolean = false,
     val typographyScale: TypographyScale = TypographyScale.MEDIUM,
     val albumArtShape: AlbumArtShape = AlbumArtShape.ROUNDED_SQUARE,
@@ -52,9 +55,16 @@ data class AppearanceUiState(
 )
 
 @HiltViewModel
-class AppearanceSettingsViewModel @Inject constructor() : ViewModel() {
+class AppearanceSettingsViewModel @Inject constructor(
+    private val themePreference: ThemePreference,
+) : ViewModel() {
 
-    private val _uiState = MutableStateFlow(AppearanceUiState())
+    // Seeded from the persisted value rather than the default, so reopening this screen shows
+    // the mode actually in force. Previously the state was local, so the picker could display
+    // "Dark" while the app rendered something else entirely.
+    private val _uiState = MutableStateFlow(
+        AppearanceUiState(themeMode = themePreference.initialMode())
+    )
     val uiState: StateFlow<AppearanceUiState> = _uiState.asStateFlow()
 
     val presetColors = listOf(
@@ -66,8 +76,16 @@ class AppearanceSettingsViewModel @Inject constructor() : ViewModel() {
         Triple("Orange", Color(0xFFFF9800), 36f)
     )
 
+    /**
+     * Applies [mode] and writes it through to [ThemePreference].
+     *
+     * Both halves are needed: the local copy keeps the picker's selection highlight immediate,
+     * and the preference is what `MainActivity` observes to actually rebuild the colour scheme.
+     * Writing only the local copy is the original bug — the control appeared to work.
+     */
     fun setThemeMode(mode: ThemeMode) {
         _uiState.value = _uiState.value.copy(themeMode = mode)
+        viewModelScope.launch { themePreference.setMode(mode) }
     }
 
     fun setAccentColor(name: String, color: Color) {
