@@ -33,6 +33,21 @@ class InnerTubeApi @Inject constructor(
     private companion object {
         /** Every lyrics-tab browse id begins with this; how the tab is recognised in `next`. */
         private const val LYRICS_BROWSE_PREFIX = "MPLYt"
+
+        /** The result type search must keep; the others are not playable as tracks. */
+        private const val SONG_CATEGORY = "Song"
+
+        /** Renderers that can hold `musicResponsiveListItemRenderer` rows. See [listRowsIn]. */
+        private val ROW_CONTAINERS = listOf(
+            "musicShelfRenderer",
+            "musicCardShelfRenderer",
+            "itemSectionRenderer"
+        )
+
+        /** Result types a search row can declare in its second column. */
+        private val RESULT_CATEGORIES = setOf(
+            "Song", "Video", "Episode", "Album", "Artist", "Playlist", "Podcast", "Profile"
+        )
     }
 
     private val innerTubeContext = buildJsonObject {
@@ -78,57 +93,19 @@ class InnerTubeApi @Inject constructor(
                     ?: continue
 
                 for (section in sectionList) {
-                    val musicShelf = section.jsonObject
-                        .get("musicShelfRenderer")?.jsonObject
-                        ?.get("contents")?.jsonArray
-                        ?: continue
-
-                    for (item in musicShelf) {
-                        val listItem = item.jsonObject
-                            .get("musicResponsiveListItemRenderer")?.jsonObject
-                            ?: continue
-
+                    for (listItem in listRowsIn(section.jsonObject)) {
                         val videoId = extractVideoId(listItem) ?: continue
-                        val flexColumns = listItem.get("flexColumns")?.jsonArray ?: continue
 
-                        var title = "Unknown Track"
-                        var artistName = "Unknown Artist"
-                        var durationMs = 0L
+                        // Search is unfiltered: a query for a track also returns videos, episodes
+                        // and playlists. Only songs are playable, so the rest are dropped. A row
+                        // that declares no type at all is kept, because album-style rows omit it.
+                        val category = rowCategory(listItem)
+                        if (category != null && category != SONG_CATEGORY) continue
 
-                        for (column in flexColumns) {
-                            val runs = column.jsonObject
-                                .get("musicResponsiveListItemFlexColumnRenderer")?.jsonObject
-                                ?.get("text")?.jsonObject
-                                ?.get("runs")?.jsonArray
-                                ?: continue
-
-                            val text = runs.joinToString("") {
-                                it.jsonObject.get("text")?.jsonPrimitive?.content ?: ""
-                            }.trim()
-
-                            when {
-                                text.isBlank() -> continue
-                                runs.size == 1 && text.contains(":") -> {
-                                    durationMs = parseDuration(text)
-                                }
-                                else -> {
-                                    val firstRunText = runs.firstOrNull()
-                                        ?.jsonObject?.get("text")?.jsonPrimitive?.content ?: ""
-                                    if (title == "Unknown Track" && firstRunText.isNotBlank() && !firstRunText.contains(":")) {
-                                        title = firstRunText
-                                    } else if (artistName == "Unknown Artist" && runs.size > 1) {
-                                        artistName = text
-                                    }
-                                }
-                            }
-                        }
-
-                        // The flex-column scan above only finds a duration when it happens to sit
-                        // among the title and artist; in a music row it is in `fixedColumns`
-                        // instead, so fill it in from there rather than leaving every search result
-                        // at the default.
-                        if (durationMs == 0L) durationMs = parseRowDuration(listItem)
-
+                        // Shared with album browse rather than parsed again here: the inline
+                        // version this replaced required the artist column to have more than one
+                        // run, which silently discarded most artists.
+                        val (title, artistName, durationMs) = parseTrackColumns(listItem)
                         val artworkUrl = extractArtworkUrl(listItem)
 
                         songs.add(
@@ -384,12 +361,32 @@ class InnerTubeApi @Inject constructor(
         var title = "Unknown Track"
         var artistName = "Unknown Artist"
         var durationMs = 0L
-        val flexColumns = listItem["flexColumns"]?.jsonArray
-            ?: return Triple(title, artistName, durationMs)
 
-        // Flatten the non-blank columns first. Skipping blanks matters because a row with no
-        // artist still emits an empty column, and indexing into the raw array would then read
-        // the album as the artist.
+        val texts = columnTexts(listItem)
+        if (texts.isEmpty()) return Triple(title, artistName, durationMs)
+
+        // Position carries the meaning in a music shelf row: title, then artist, then album, with
+        // the duration last. Reading by position is what lets a single-run artist column be
+        // recognised — the previous `runs.size > 1` test silently dropped every artist whose name
+        // was one run, which is most of them, and those rows rendered as "Unknown Artist".
+        title = texts.first()
+        durationMs = parseRowDuration(listItem)
+        artistName = texts.drop(1)
+            .map { cleanArtistText(it) }
+            .firstOrNull { !looksLikeDuration(it) && it.isNotBlank() }
+            ?: "Unknown Artist"
+
+        return Triple(title, artistName, durationMs)
+    }
+
+    /**
+     * The non-blank text of each flex column, left to right.
+     *
+     * Skipping blanks matters because a row with no artist still emits an empty column, and
+     * indexing into the raw array would then read the album as the artist.
+     */
+    private fun columnTexts(listItem: JsonObject): List<String> {
+        val flexColumns = listItem["flexColumns"]?.jsonArray ?: return emptyList()
         val texts = ArrayList<String>(flexColumns.size)
         for (column in flexColumns) {
             val runs = column.jsonObject
@@ -401,17 +398,51 @@ class InnerTubeApi @Inject constructor(
             }.trim()
             if (text.isNotBlank()) texts += text
         }
-        if (texts.isEmpty()) return Triple(title, artistName, durationMs)
+        return texts
+    }
 
-        // Position carries the meaning in a music shelf row: title, then artist, then album, with
-        // the duration last. Reading by position is what lets a single-run artist column be
-        // recognised — the previous `runs.size > 1` test silently dropped every artist whose name
-        // was one run, which is most of them, and those rows rendered as "Unknown Artist".
-        title = texts.first()
-        durationMs = parseRowDuration(listItem)
-        artistName = texts.drop(1).firstOrNull { !looksLikeDuration(it) } ?: "Unknown Artist"
+    /**
+     * The result type a search row declares, e.g. `Song`, `Video`, `Episode`, or `null` when the
+     * row does not declare one.
+     *
+     * Search is unfiltered, so the type has to be read from the row itself — it is the first
+     * `•`-separated segment of the second column (`Song • Ed Sheeran`). Album rows do not carry
+     * one, which is why a missing type is treated as "unknown", not as "song".
+     */
+    private fun rowCategory(listItem: JsonObject): String? {
+        val second = columnTexts(listItem).drop(1).firstOrNull() ?: return null
+        return second.substringBefore("•").trim().takeIf { it in RESULT_CATEGORIES }
+    }
 
-        return Triple(title, artistName, durationMs)
+    /**
+     * Strips the search-result decorations off an artist column.
+     *
+     * Two things get appended in search rows: the result type (`Song • Ed Sheeran`) and, on some
+     * rows, view counts and a duration (`Ed Sheeran • 4.2B views`). Splitting on the spaced
+     * separator rather than a bare `•` keeps artist names that legitimately contain one intact.
+     */
+    private fun cleanArtistText(text: String): String {
+        val head = text.substringBefore(" • ").trim()
+        return if (head in RESULT_CATEGORIES) text.substringAfter(" • ").substringBefore(" • ").trim() else head
+    }
+
+    /**
+     * Every `musicResponsiveListItemRenderer` in [section].
+     *
+     * Three different renderers hold result rows and which one appears depends on the endpoint:
+     * album browse uses `musicShelfRenderer`, while search uses `musicCardShelfRenderer` for the
+     * top-result block and `itemSectionRenderer` for the rest — and **no** `musicShelfRenderer` at
+     * all. Accepting only the last one is why search returned zero results from an 800 KB response.
+     */
+    private fun listRowsIn(section: JsonObject): List<JsonObject> {
+        val rows = mutableListOf<JsonObject>()
+        for (key in ROW_CONTAINERS) {
+            val contents = section[key]?.jsonObject?.get("contents")?.jsonArray ?: continue
+            for (item in contents) {
+                item.jsonObject["musicResponsiveListItemRenderer"]?.jsonObject?.let { rows += it }
+            }
+        }
+        return rows
     }
 
     /**
