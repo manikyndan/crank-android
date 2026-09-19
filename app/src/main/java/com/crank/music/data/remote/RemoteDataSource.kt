@@ -27,7 +27,8 @@ data class ITunesTrackDto(
     @SerialName("trackTimeMillis") val trackTimeMillis: Long? = null,
     @SerialName("artworkUrl100") val artworkUrl100: String? = null,
     @SerialName("previewUrl") val previewUrl: String? = null,
-    @SerialName("releaseDate") val releaseDate: String? = null
+    @SerialName("releaseDate") val releaseDate: String? = null,
+    @SerialName("trackCount") val trackCount: Int? = null
 )
 
 interface RemoteDataSource {
@@ -94,7 +95,11 @@ class RemoteDataSourceImpl @Inject constructor(
 
     private fun ITunesTrackDto.toAlbum(): Album {
         val artwork = ArtworkUrl.upgrade(artworkUrl100.orEmpty())
-        val year = releaseDate?.take(4) ?: "2024"
+        // iTunes dates read "2019-05-17T07:00:00Z"; the leading four characters are the year
+        // and the only part the UI shows. A missing date is blank, not a stand-in: "2024" put
+        // a real-looking year on every album iTunes had no date for, indistinguishable from
+        // one it did. Same rule as the durationMs default above.
+        val year = releaseDate?.take(4) ?: ""
 
         return Album(
             id = collectionId?.toString() ?: UUID.randomUUID().toString(),
@@ -102,7 +107,10 @@ class RemoteDataSourceImpl @Inject constructor(
             artistName = artistName ?: "Unknown Artist",
             releaseYear = year,
             artworkUrl = artwork,
-            trackCount = 10
+            // The real count, which iTunes reports on the collection. The literal 10 that stood
+            // here was applied to every album regardless of how many tracks it held, so the
+            // number on screen was invented even though the field looked populated.
+            trackCount = trackCount ?: 0
         )
     }
 }

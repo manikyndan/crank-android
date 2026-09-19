@@ -52,8 +52,13 @@ class InnerTubeApi @Inject constructor(
 
     private val innerTubeContext = buildJsonObject {
         put("client", buildJsonObject {
-            put("clientName", JsonPrimitive("WEB_REMIX"))
-            put("clientVersion", JsonPrimitive("1.20231212.00.00"))
+            put("clientName", JsonPrimitive(YouTubeClients.WEB_REMIX.clientName))
+            // Read from the client table rather than pinned here. This context declares itself
+            // as WEB_REMIX, so a version hardcoded below it drifts from the one [YouTubeClients]
+            // actually sends, and browse/search degrade in ways that read as network faults: a
+            // shelf comes back empty while the HTTP call still reports 200. It sat at
+            // 1.20231212.00.00 while the client table was two and a half years ahead.
+            put("clientVersion", JsonPrimitive(YouTubeClients.WEB_REMIX.clientVersion))
             put("hl", JsonPrimitive("en"))
             put("gl", JsonPrimitive("US"))
         })
@@ -188,8 +193,7 @@ class InnerTubeApi @Inject constructor(
                             it.jsonObject.get("text")?.jsonPrimitive?.content ?: ""
                         } ?: ""
 
-                    val artistName = subtitle.split("•").firstOrNull()?.trim() ?: "Unknown Artist"
-                    val year = subtitle.split("•").lastOrNull()?.trim() ?: "2024"
+                    val (artistName, year) = parseAlbumSubtitle(subtitle)
 
                     val artworkUrl = extractArtworkUrl(twoRowItem)
 
@@ -676,4 +680,33 @@ class InnerTubeApi @Inject constructor(
             0L
         }
     }
+}
+
+/**
+ * Reads (artist, releaseYear) out of a home-feed album card's subtitle.
+ *
+ * The subtitle arrives as the card's `runs` joined into one string: "Ed Sheeran • 2017", or
+ * just "Ed Sheeran", or "Ed Sheeran • Divide". Splitting on the bullet and taking the first
+ * and last fields — which is what this replaced — fails in two separate ways:
+ *
+ * 1. **`split` with no match returns the whole string**, not an empty list. So
+ *    `"Ed Sheeran".split("•")` is `["Ed Sheeran"]` and `lastOrNull()` hands back the artist.
+ *    Every album whose subtitle had no bullet got its release year set to the artist's name.
+ * 2. **The trailing field is not always a year.** "Artist • Deluxe" is a real shape, and the
+ *    old code stored "Deluxe" as a release year.
+ *
+ * The year is therefore taken only from a field that is four digits, and is blank otherwise.
+ * A missing date must render as nothing: a default year is indistinguishable from a real one,
+ * which is the same rule that removed the invented three-minute durations elsewhere.
+ *
+ * Extracted from `getHomeData` and `internal` rather than `private` so the tests in this
+ * package can pin both cases above — see `AlbumSubtitleParsingTest`.
+ */
+internal fun parseAlbumSubtitle(subtitle: String): Pair<String, String> {
+    val fields = subtitle.split("•").map { it.trim() }.filter { it.isNotEmpty() }
+    val artist = fields.firstOrNull() ?: "Unknown Artist"
+    val year = fields.drop(1)
+        .firstOrNull { it.length == 4 && it.all { c -> c.isDigit() } }
+        .orEmpty()
+    return artist to year
 }
