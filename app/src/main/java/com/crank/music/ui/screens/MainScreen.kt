@@ -275,10 +275,14 @@ fun MainScreen(
             // layer resolves albums by text, so those two strings are what the destination actually
             // needs. Passing only an id meant the screen searched for the id itself.
             composable(
-                route = "album_detail/{albumTitle}?albumArtist={albumArtist}",
+                route = "album_detail/{albumTitle}?albumArtist={albumArtist}&browseId={browseId}",
                 arguments = listOf(
                     navArgument("albumTitle") { type = NavType.StringType },
                     navArgument("albumArtist") {
+                        type = NavType.StringType
+                        defaultValue = ""
+                    },
+                    navArgument("browseId") {
                         type = NavType.StringType
                         defaultValue = ""
                     },
@@ -445,5 +449,6 @@ fun MainScreen(
 private fun albumRoute(album: Album): String {
     val title = android.net.Uri.encode(album.title)
     val artist = android.net.Uri.encode(album.artistName)
-    return "album_detail/$title?albumArtist=$artist"
+    val browseId = android.net.Uri.encode(album.id)
+    return "album_detail/$title?albumArtist=$artist&browseId=$browseId"
 }

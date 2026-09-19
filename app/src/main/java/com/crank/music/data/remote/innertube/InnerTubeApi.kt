@@ -16,6 +16,7 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.coroutines.CancellationException
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -219,6 +220,112 @@ class InnerTubeApi @Inject constructor(
             Log.e("CRANK_INTEGRATION", "Browse URL: ${innerTubeConfig.musicBaseUrl}/browse")
             emptyList()
         }
+    }
+
+    /**
+     * Real YouTube Music browse endpoint for a single album or playlist, addressed by its
+     * [browseId] — the id the home/explore feeds already hand us for each card.
+     *
+     * ## Why this exists
+     *
+     * This is the missing half of album navigation. Previously the album screen had no way to ask
+     * YouTube for an album's *tracklist* — `browseId` was thrown away at navigation and the screen
+     * instead searched the album's *name* as free text and labelled whatever came back. That returns
+     * a bag of vaguely-related songs, not the album. Here we hit the actual `browse` endpoint and
+     * parse its track shelf, reusing the same video-id / artwork / duration extraction that the
+     * search and home paths already rely on, so the album opens to the real songs.
+     */
+    suspend fun browsePlaylistOrAlbum(browseId: String): List<Song> {
+        if (browseId.isBlank()) return emptyList()
+        return try {
+            val requestBody = buildJsonObject {
+                put("context", innerTubeContext)
+                put("browseId", JsonPrimitive(browseId))
+            }
+
+            val response: JsonObject = client.post {
+                url(innerTubeConfig.withMusicKey("browse"))
+                contentType(ContentType.Application.Json)
+                setBody(requestBody)
+            }.body()
+
+            val contents = response["contents"]?.jsonObject
+                ?.get("singleColumnBrowseResultsRenderer")?.jsonObject
+                ?.get("tabs")?.jsonArray
+                ?.firstOrNull()?.jsonObject
+                ?.get("tabRenderer")?.jsonObject
+                ?.get("content")?.jsonObject
+                ?.get("sectionListRenderer")?.jsonObject
+                ?.get("contents")?.jsonArray
+                ?: return emptyList()
+
+            val songs = mutableListOf<Song>()
+            for (section in contents) {
+                val sectionObj = section.jsonObject
+                // Albums expose tracks via musicShelfRenderer; playlists via musicPlaylistShelfRenderer.
+                val shelf = sectionObj["musicShelfRenderer"]?.jsonObject
+                    ?: sectionObj["musicPlaylistShelfRenderer"]?.jsonObject
+                    ?: continue
+                val items = shelf["contents"]?.jsonArray ?: continue
+                for (item in items) {
+                    val track = item.jsonObject["musicResponsiveListItemRenderer"]?.jsonObject ?: continue
+                    val videoId = extractVideoId(track) ?: continue
+                    val (title, artistName, durationMs) = parseTrackColumns(track)
+                    val artworkUrl = extractArtworkUrl(track)
+                    songs.add(
+                        Song(
+                            id = videoId,
+                            title = title,
+                            artistName = artistName,
+                            albumId = browseId,
+                            durationMs = durationMs,
+                            artworkUrl = artworkUrl,
+                            isLocal = false,
+                            streamUrl = videoId
+                        )
+                    )
+                }
+            }
+            songs
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Log.e(TAG, "Browse '$browseId' failed: ${e.javaClass.simpleName}: ${e.message}")
+            emptyList()
+        }
+    }
+
+    /**
+     * Pulls (title, artist, duration) out of a `musicResponsiveListItemRenderer`'s flex columns.
+     * Shared shape with [searchMusic]'s per-item parse, kept local to avoid perturbing that path.
+     */
+    private fun parseTrackColumns(listItem: JsonObject): Triple<String, String, Long> {
+        var title = "Unknown Track"
+        var artistName = "Unknown Artist"
+        var durationMs = 180_000L
+        val flexColumns = listItem["flexColumns"]?.jsonArray ?: return Triple(title, artistName, durationMs)
+        for (column in flexColumns) {
+            val runs = column.jsonObject
+                .get("musicResponsiveListItemFlexColumnRenderer")?.jsonObject
+                ?.get("text")?.jsonObject
+                ?.get("runs")?.jsonArray ?: continue
+            val text = runs.joinToString("") {
+                it.jsonObject.get("text")?.jsonPrimitive?.content ?: ""
+            }.trim()
+            when {
+                text.isBlank() -> continue
+                runs.size == 1 && text.contains(":") -> durationMs = parseDuration(text)
+                else -> {
+                    val firstRunText = runs.firstOrNull()?.jsonObject?.get("text")?.jsonPrimitive?.content ?: ""
+                    if (title == "Unknown Track" && firstRunText.isNotBlank() && !firstRunText.contains(":")) {
+                        title = firstRunText
+                    } else if (artistName == "Unknown Artist" && runs.size > 1) {
+                        artistName = text
+                    }
+                }
+            }
+        }
+        return Triple(title, artistName, durationMs)
     }
 
     /**

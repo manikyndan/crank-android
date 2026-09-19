@@ -16,6 +16,17 @@ data class LyricsSearchResult(
 interface MusicRepository {
     suspend fun search(query: String): List<Song>
     suspend fun getHomeRecommendations(): List<Album>
+
+    /**
+     * The real YouTube Music tracklist for an album or playlist, addressed by its `browseId`.
+     *
+     * Distinct from [search]: that matches free text and returns a bag of loosely-related songs;
+     * this hits the `browse` endpoint and returns the actual songs that belong to the collection.
+     * Callers (e.g. the album detail screen) should try this first and only fall back to [search]
+     * when the id is not a real YouTube browse id (local/offline albums) or the browse comes back
+     * empty.
+     */
+    suspend fun browseCollection(browseId: String): List<Song>
     suspend fun getSongStreamUrl(songId: String, songTitle: String = "", artistName: String = ""): StreamData
     suspend fun getSongDetails(songId: String): Song
     suspend fun searchLyrics(trackName: String, artistName: String): LyricsSearchResult?

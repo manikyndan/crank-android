@@ -25,9 +25,10 @@ data class AlbumDetailUiState(
 /**
  * Backs the album destination.
  *
- * The album is addressed by a **search query plus its display name**, both supplied by the route,
- * because the app's stream/search layer identifies tracks by free-text query — an album id from
- * the search results is not something the backend can be asked about directly.
+ * The album is addressed by a **browse id** when one is available (the home/explore feeds hand us
+ * a real YouTube `browseId` per card), with the display title/artist carried along for labelling.
+ * When a real browse id is present we hit the actual `browse` endpoint and get the album's true
+ * tracklist; otherwise we fall back to a name search (local/offline albums have no YouTube id).
  *
  * The previous version fed the raw route id straight into `musicRepository.search(albumId)`, so a
  * request for album `1234567` searched for the literal text "1234567" and then labelled whatever
@@ -41,6 +42,10 @@ class AlbumDetailViewModel @Inject constructor(
 
     private val albumTitle: String = savedStateHandle.get<String>("albumTitle").orEmpty()
     private val albumArtist: String = savedStateHandle.get<String>("albumArtist").orEmpty()
+    private val browseId: String = savedStateHandle.get<String>("browseId").orEmpty()
+
+    private fun searchQuery(): String =
+        listOf(albumTitle, albumArtist).filter { it.isNotBlank() }.joinToString(" ")
 
     private val _uiState = MutableStateFlow(
         AlbumDetailUiState(
@@ -63,8 +68,8 @@ class AlbumDetailViewModel @Inject constructor(
     }
 
     private fun loadAlbumDetails() {
-        // Nothing to search for. Stop rather than searching for an empty string.
-        if (albumTitle.isBlank() && albumArtist.isBlank()) {
+        // Nothing to look up. Stop rather than searching for an empty string.
+        if (browseId.isBlank() && albumTitle.isBlank() && albumArtist.isBlank()) {
             _uiState.value = _uiState.value.copy(isLoading = false, isResolved = true)
             return
         }
@@ -72,10 +77,15 @@ class AlbumDetailViewModel @Inject constructor(
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isLoading = true)
             try {
-                val query = listOf(albumTitle, albumArtist)
-                    .filter { it.isNotBlank() }
-                    .joinToString(" ")
-                val results = musicRepository.search(query)
+                // Prefer the real browse endpoint when we were given a YouTube browse id. If it
+                // comes back empty (id isn't a real YouTube collection, or a transient failure) we
+                // fall back to a name search so local/offline albums still resolve to something.
+                val results = if (browseId.isNotBlank()) {
+                    val browsed = musicRepository.browseCollection(browseId)
+                    if (browsed.isNotEmpty()) browsed else musicRepository.search(searchQuery())
+                } else {
+                    musicRepository.search(searchQuery())
+                }
 
                 val artwork = results.firstOrNull()?.artworkUrl.orEmpty()
                 _uiState.value = AlbumDetailUiState(
