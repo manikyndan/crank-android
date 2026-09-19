@@ -92,7 +92,7 @@ class InnerTubeApi @Inject constructor(
 
                         var title = "Unknown Track"
                         var artistName = "Unknown Artist"
-                        var durationMs = 180_000L
+                        var durationMs = 0L
 
                         for (column in flexColumns) {
                             val runs = column.jsonObject
@@ -121,6 +121,12 @@ class InnerTubeApi @Inject constructor(
                                 }
                             }
                         }
+
+                        // The flex-column scan above only finds a duration when it happens to sit
+                        // among the title and artist; in a music row it is in `fixedColumns`
+                        // instead, so fill it in from there rather than leaving every search result
+                        // at the default.
+                        if (durationMs == 0L) durationMs = parseRowDuration(listItem)
 
                         val artworkUrl = extractArtworkUrl(listItem)
 
@@ -335,13 +341,48 @@ class InnerTubeApi @Inject constructor(
     }
 
     /**
+     * Reads a row's running time.
+     *
+     * A music shelf row keeps the duration in `fixedColumns`, not with the title and artist in
+     * `flexColumns`. Measured on a real album response: `flexColumns=[Gehra Hua, Arijit Singh, …]`,
+     * `fixedColumns=[3:51]`. Reading only flex columns therefore never found a duration, and every
+     * track fell through to the default of 180 000 ms — three invented minutes that the UI rendered
+     * as "3:00" for every song in the library, and that lyric matching then scored candidates
+     * against as though it were real.
+     *
+     * Returns `0` when the row carries no duration. Inventing a plausible value is worse than
+     * admitting it is missing: a fabricated number is silently wrong for every track and cannot be
+     * told apart from a real one downstream.
+     */
+    private fun parseRowDuration(listItem: JsonObject): Long {
+        val columns = (listItem["fixedColumns"]?.jsonArray ?: emptyList()) +
+            (listItem["flexColumns"]?.jsonArray ?: emptyList())
+
+        for (column in columns) {
+            val renderer = column.jsonObject.let {
+                it["musicResponsiveListItemFixedColumnRenderer"]
+                    ?: it["musicResponsiveListItemFlexColumnRenderer"]
+            } ?: continue
+
+            val runs = renderer.jsonObject["text"]?.jsonObject?.get("runs")?.jsonArray ?: continue
+            val text = runs.joinToString("") {
+                it.jsonObject["text"]?.jsonPrimitive?.content ?: ""
+            }.trim()
+
+            // Kept strict: "Intro: Serenade" is a title, not a running time.
+            if (looksLikeDuration(text)) return parseDuration(text)
+        }
+        return 0L
+    }
+
+    /**
      * Pulls (title, artist, duration) out of a `musicResponsiveListItemRenderer`'s flex columns.
      * Shared shape with [searchMusic]'s per-item parse, kept local to avoid perturbing that path.
      */
     private fun parseTrackColumns(listItem: JsonObject): Triple<String, String, Long> {
         var title = "Unknown Track"
         var artistName = "Unknown Artist"
-        var durationMs = 180_000L
+        var durationMs = 0L
         val flexColumns = listItem["flexColumns"]?.jsonArray
             ?: return Triple(title, artistName, durationMs)
 
@@ -366,7 +407,7 @@ class InnerTubeApi @Inject constructor(
         // recognised — the previous `runs.size > 1` test silently dropped every artist whose name
         // was one run, which is most of them, and those rows rendered as "Unknown Artist".
         title = texts.first()
-        durationMs = texts.firstOrNull(::looksLikeDuration)?.let { parseDuration(it) } ?: 180_000L
+        durationMs = parseRowDuration(listItem)
         artistName = texts.drop(1).firstOrNull { !looksLikeDuration(it) } ?: "Unknown Artist"
 
         return Triple(title, artistName, durationMs)
@@ -610,10 +651,10 @@ class InnerTubeApi @Inject constructor(
             when (parts.size) {
                 2 -> (parts[0].toLongOrNull() ?: 0L) * 60_000 + (parts[1].toLongOrNull() ?: 0L) * 1_000
                 3 -> (parts[0].toLongOrNull() ?: 0L) * 3_600_000 + (parts[1].toLongOrNull() ?: 0L) * 60_000 + (parts[2].toLongOrNull() ?: 0L) * 1_000
-                else -> 180_000L
+                else -> 0L
             }
         } catch (e: Exception) {
-            180_000L
+            0L
         }
     }
 }

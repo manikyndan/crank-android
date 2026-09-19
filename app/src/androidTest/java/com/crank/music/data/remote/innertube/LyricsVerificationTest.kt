@@ -95,7 +95,7 @@ class LyricsVerificationTest {
 
             Log.i(
                 TAG,
-                "  '${song.title}' -> ${lyrics?.length ?: 0} chars / " +
+                "  '${song.title}' dur=${song.durationMs} -> ${lyrics?.length ?: 0} chars / " +
                     "${lines?.lines?.size ?: 0} lines (${lines?.timing}) " +
                     "(youtube=${youtube?.length ?: 0}, lrclib=${fallback?.length ?: 0})",
             )

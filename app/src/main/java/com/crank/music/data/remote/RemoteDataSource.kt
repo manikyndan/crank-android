@@ -83,7 +83,9 @@ class RemoteDataSourceImpl @Inject constructor(
             title = name,
             artistName = artistName ?: "Unknown Artist",
             albumId = collectionId?.toString(),
-            durationMs = trackTimeMillis ?: 180000L,
+            // Unknown, not invented: a default of three minutes renders as "3:00" for every track
+            // and cannot be distinguished from a real duration.
+            durationMs = trackTimeMillis ?: 0L,
             artworkUrl = artwork,
             isLocal = false,
             streamUrl = stream
