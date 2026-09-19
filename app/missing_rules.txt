@@ -21,6 +21,12 @@
 -dontwarn java.beans.Introspector
 -dontwarn java.beans.PropertyDescriptor
 
+# Rhino also advertises itself as a javax.script engine via a META-INF/services
+# entry. javax.script.ScriptEngineFactory is absent on Android, so the service
+# file is an unresolvable reference. R8 warns but does not fail; the rule keeps
+# the build output clean so a real problem is visible.
+-dontwarn javax.script.ScriptEngineFactory
+
 # Ktor's debugger detector is a JVM-only convenience check.
 # java.lang.management does not exist on Android.
 -dontwarn java.lang.management.ManagementFactory

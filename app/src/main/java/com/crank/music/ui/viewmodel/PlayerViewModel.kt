@@ -15,6 +15,7 @@ import androidx.media3.exoplayer.ExoPlayer
 import com.crank.music.data.local.HistoryEntity
 import com.crank.music.data.local.QueueItemEntity
 import com.crank.music.data.local.SongDao
+import com.crank.music.data.remote.StreamResolver
 import com.crank.music.domain.model.DownloadState
 import com.crank.music.domain.model.Song
 import com.crank.music.domain.repository.DownloadRepository
@@ -90,6 +91,15 @@ class PlayerViewModel @Inject constructor(
 
     private val playRequestCounter = AtomicLong(0)
 
+    /**
+     * The song we have already re-resolved once after a 403.
+     *
+     * Guards against the retry itself failing and looping: without it, an
+     * upstream refusal (every client identity rejected) would re-resolve forever
+     * with a fresh CoroutineScope each time.
+     */
+    private var retriedSongId: String? = null
+
     private var originalQueue = listOf<Song>()
     private var shuffledIndices = mutableListOf<Int>()
 
@@ -140,6 +150,25 @@ class PlayerViewModel @Inject constructor(
                     errorMessage = "Playback failed: ${error.message ?: "Unknown error"}"
                 )
             }
+
+            // A 403 from YouTube means the signed URL we were handed has expired
+            // (or been rejected). The track is fine — the link is not — so the
+            // right response is one re-resolve, not a skip. Skipping is what the
+            // user sees as "the app jumped to the next song for no reason".
+            //
+            // Only retry once per track: if a freshly minted URL also fails, the
+            // problem is upstream and marching the user through every song in the
+            // queue would just hide it.
+            val song = _playerState.value.currentSong
+            if (song != null && isExpiredUrlError(error) && retriedSongId != song.id) {
+                retriedSongId = song.id
+                Log.d("CRANK_PLAYER", "403 on '${song.title}' — re-resolving once")
+                viewModelScope.launch {
+                    resolveAndPlay(song, forceRefresh = true, reason = "stream URL expired")
+                }
+                return
+            }
+
             viewModelScope.launch {
                 delay(1000)
                 playNext()
@@ -438,20 +467,33 @@ class PlayerViewModel @Inject constructor(
      * Returns `null` when the song has no playable source at all, so callers can
      * report a specific reason rather than a generic failure.
      *
-     * Throws whatever the resolver throws. Note that a [Song.streamUrl] which is
-     * already an absolute URL is passed through untouched (some sources hand back
-     * a direct CDN link), while anything else — a bare video ID, most commonly —
-     * is treated as an identifier to resolve.
+     * A [Song.streamUrl] that is a *stable* absolute URL is passed through
+     * untouched. A YouTube URL is not stable: it carries an `expire` parameter
+     * and turns into a hard HTTP 403 once that passes, so a stale one is always
+     * re-resolved against `song.id` rather than replayed. That is what made
+     * resuming a saved session fail: the persisted URL was days old, the request
+     * came back 403, and the player skipped the track.
+     *
+     * Throws whatever the resolver throws.
      */
     private suspend fun resolvePlayableUrl(song: Song): String? {
         if (!song.isPlayable) return null
 
-        val target = if (song.streamUrl.isNotBlank()) song.streamUrl else song.id
-        val streamData = if (target.startsWith("http://") || target.startsWith("https://")) {
-            com.crank.music.data.remote.StreamData(url = target)
-        } else {
-            musicRepository.getSongStreamUrl(target, song.title, song.artistName)
+        val streamUrl = song.streamUrl
+        if (StreamResolver.isDirectlyPlayable(streamUrl)) {
+            return streamUrl.takeIf { it.isNotBlank() }
         }
+
+        if (streamUrl.startsWith("http")) {
+            Log.d(
+                "CRANK_PLAYER",
+                "Discarding stale stream URL for '${song.title}' and re-resolving ${song.id}"
+            )
+        }
+
+        // song.id is authoritative: even when streamUrl held a URL, that URL is
+        // the thing we just rejected, so the identifier is the only useful input.
+        val streamData = musicRepository.getSongStreamUrl(song.id, song.title, song.artistName)
         return streamData.url.takeIf { it.isNotBlank() }
     }
 
@@ -466,8 +508,93 @@ class PlayerViewModel @Inject constructor(
         "This is a recognised track with no audio source yet. " +
             "Search for \"${song.title}\" by ${song.artistName} to play it."
 
+    /**
+     * True when [error] looks like an expired/rejected stream URL rather than a
+     * genuinely broken track.
+     *
+     * Matched on the message rather than the cause type on purpose: the 403 is
+     * wrapped several layers deep (`ExoPlaybackException` → `Source error` →
+     * `HttpDataSource$InvalidResponseCodeException`), and walking that chain
+     * couples this class to ExoPlayer's internal exception hierarchy. The
+     * message is stable across Media3 releases and is what the log shows.
+     */
+    private fun isExpiredUrlError(error: PlaybackException): Boolean {
+        val text = generateSequence(error) { it.cause as? PlaybackException }
+            .joinToString(" ") { it.message.orEmpty() }
+        return text.contains("403") || text.contains("InvalidResponseCode")
+    }
+
+    /**
+     * Resolves [song] and hands it to the player, reporting failures on the
+     * player state.
+     *
+     * [forceRefresh] skips the "this URL still looks valid" shortcut, which is
+     * what the 403-retry path needs: the URL just failed, so its own expiry
+     * stamp cannot be trusted to tell us whether it works.
+     */
+    private suspend fun resolveAndPlay(
+        song: Song,
+        forceRefresh: Boolean = false,
+        reason: String = "play"
+    ) {
+        if (!song.isPlayable) {
+            Log.d("CRANK_PLAYER", "Song '${song.title}' has no playable source (recognised only)")
+            _playerState.update {
+                it.copy(isLoading = false, errorMessage = unresolvedMessage(song))
+            }
+            return
+        }
+
+        val resolvedUrl = if (forceRefresh) {
+            val streamData = musicRepository.getSongStreamUrl(song.id, song.title, song.artistName)
+            streamData.url.takeIf { it.isNotBlank() }
+        } else {
+            resolvePlayableUrl(song)
+        }
+
+        if (resolvedUrl == null) {
+            Log.e("CRANK_PLAYER", "Empty stream URL for ${song.title} (${song.id})")
+            _playerState.update {
+                it.copy(isLoading = false, errorMessage = "No audio stream available for: ${song.title}")
+            }
+            return
+        }
+
+        Log.d("CRANK_PLAYER", "$reason: ${song.title} (${song.id}) -> ${resolvedUrl.take(80)}...")
+
+        val mediaItem = MediaItem.Builder()
+            .setMediaId(song.id)
+            .setUri(resolvedUrl)
+            .setMediaMetadata(
+                MediaMetadata.Builder()
+                    .setTitle(song.title)
+                    .setArtist(song.artistName)
+                    .setAlbumTitle(song.albumId)
+                    .setArtworkUri(if (song.artworkUrl.isNotBlank()) song.artworkUrl.toUri() else null)
+                    .build()
+            )
+            .build()
+
+        player.setMediaItem(mediaItem)
+        player.prepare()
+        player.play()
+
+        _playerState.update {
+            it.copy(
+                currentSong = song.copy(streamUrl = resolvedUrl),
+                isLoading = false,
+                errorMessage = null
+            )
+        }
+        generateLyricsForSong(song)
+        saveCurrentPlaybackPosition()
+    }
+
     fun playSong(song: Song) {
         val requestId = playRequestCounter.incrementAndGet()
+
+        // A deliberate play means the previous 403-retry budget no longer applies.
+        retriedSongId = null
 
         if (historyIndex >= 0 && historyIndex < playHistory.size - 1) {
             playHistory.subList(historyIndex + 1, playHistory.size).clear()
@@ -479,60 +606,7 @@ class PlayerViewModel @Inject constructor(
             _playerState.update { it.copy(isLoading = true, errorMessage = null) }
 
             try {
-                // A recognised-but-unsourced track carries a marker instead of a URL.
-                // Fail fast and explain it, rather than falling through to eight
-                // network round-trips that cannot succeed.
-                if (!song.isPlayable) {
-                    Log.d("CRANK_PLAYER", "Song '${song.title}' has no playable source (recognised only)")
-                    _playerState.update {
-                        it.copy(isLoading = false, errorMessage = unresolvedMessage(song))
-                    }
-                    return@launch
-                }
-
-                val resolvedUrl = resolvePlayableUrl(song)
-
-                if (requestId != playRequestCounter.get()) {
-                    Log.d("CRANK_PLAYER", "Stale request $requestId discarded for: ${song.title}")
-                    return@launch
-                }
-
-                if (resolvedUrl == null) {
-                    Log.e("CRANK_PLAYER", "Empty stream URL for ${song.title} (${song.id})")
-                    _playerState.update {
-                        it.copy(isLoading = false, errorMessage = "No audio stream available for: ${song.title}")
-                    }
-                    return@launch
-                }
-
-                Log.d("CRANK_PLAYER", "Playing: ${song.title} (${song.id}) -> ${resolvedUrl.take(80)}...")
-
-                val mediaItem = MediaItem.Builder()
-                    .setMediaId(song.id)
-                    .setUri(resolvedUrl)
-                    .setMediaMetadata(
-                        MediaMetadata.Builder()
-                            .setTitle(song.title)
-                            .setArtist(song.artistName)
-                            .setAlbumTitle(song.albumId)
-                            .setArtworkUri(if (song.artworkUrl.isNotBlank()) song.artworkUrl.toUri() else null)
-                            .build()
-                    )
-                    .build()
-
-                player.setMediaItem(mediaItem)
-                player.prepare()
-                player.play()
-
-                _playerState.update {
-                    it.copy(
-                        currentSong = song.copy(streamUrl = resolvedUrl),
-                        isLoading = false,
-                        errorMessage = null
-                    )
-                }
-                generateLyricsForSong(song)
-                saveCurrentPlaybackPosition()
+                resolveAndPlay(song)
             } catch (e: Exception) {
                 Log.e("CRANK_PLAYER", "Failed to play ${song.title} (${song.id}): ${e.message}", e)
                 if (requestId == playRequestCounter.get()) {
@@ -713,12 +787,41 @@ class PlayerViewModel @Inject constructor(
     fun togglePlayPause() {
         if (player.isPlaying) {
             player.pause()
-        } else {
-            if (player.playbackState == Player.STATE_ENDED) {
-                player.seekTo(0)
-            }
-            player.play()
+            return
         }
+
+        // Restoring a session sets currentSong but deliberately loads no media
+        // item (the saved URL may be unusable). That left Play doing nothing at
+        // all: ExoPlayer had no item, so play() was a no-op and the button
+        // looked broken. Re-resolve and actually start the track instead.
+        if (player.mediaItemCount == 0) {
+            val song = _playerState.value.currentSong
+            if (song == null) {
+                Log.d("CRANK_PLAYER", "Play pressed with nothing loaded; ignoring")
+                return
+            }
+            Log.d("CRANK_PLAYER", "Play pressed with no media item; loading '${song.title}'")
+            viewModelScope.launch {
+                _playerState.update { it.copy(isLoading = true, errorMessage = null) }
+                try {
+                    resolveAndPlay(song, forceRefresh = true, reason = "Play")
+                } catch (e: Exception) {
+                    Log.e("CRANK_PLAYER", "Failed to start '${song.title}': ${e.message}")
+                    _playerState.update {
+                        it.copy(
+                            isLoading = false,
+                            errorMessage = "Failed to load: ${e.message ?: "Unknown error"}"
+                        )
+                    }
+                }
+            }
+            return
+        }
+
+        if (player.playbackState == Player.STATE_ENDED) {
+            player.seekTo(0)
+        }
+        player.play()
     }
 
     fun seekTo(position: Long) {
@@ -730,48 +833,11 @@ class PlayerViewModel @Inject constructor(
         if (playHistory.size > 1 && historyIndex > 0) {
             historyIndex--
             val prevSong = playHistory[historyIndex]
+            retriedSongId = null
             viewModelScope.launch {
                 _playerState.update { it.copy(isLoading = true, errorMessage = null) }
                 try {
-                    if (!prevSong.isPlayable) {
-                        _playerState.update {
-                            it.copy(isLoading = false, errorMessage = unresolvedMessage(prevSong))
-                        }
-                        return@launch
-                    }
-
-                    val resolvedUrl = resolvePlayableUrl(prevSong)
-                    if (resolvedUrl != null) {
-                        val mediaItem = MediaItem.Builder()
-                            .setMediaId(prevSong.id)
-                            .setUri(resolvedUrl)
-                            .setMediaMetadata(
-                                MediaMetadata.Builder()
-                                    .setTitle(prevSong.title)
-                                    .setArtist(prevSong.artistName)
-                                    .setAlbumTitle(prevSong.albumId)
-                                    .setArtworkUri(if (prevSong.artworkUrl.isNotBlank()) prevSong.artworkUrl.toUri() else null)
-                                    .build()
-                            )
-                            .build()
-                        player.setMediaItem(mediaItem)
-                        player.prepare()
-                        player.play()
-                        _playerState.update {
-                            it.copy(
-                                currentSong = prevSong.copy(streamUrl = resolvedUrl),
-                                isLoading = false,
-                                errorMessage = null
-                            )
-                        }
-                    } else {
-                        _playerState.update {
-                            it.copy(
-                                isLoading = false,
-                                errorMessage = "No audio stream available for: ${prevSong.title}"
-                            )
-                        }
-                    }
+                    resolveAndPlay(prevSong, reason = "Previous")
                 } catch (e: Exception) {
                     Log.e("CRANK_PLAYER", "Failed to play previous: ${e.message}")
                     _playerState.update { it.copy(isLoading = false) }

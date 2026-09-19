@@ -127,7 +127,22 @@ class YouTubeStreamResolver @Inject constructor(
             }
 
             // NO iTunes fallback - only full tracks are acceptable
-            throw StreamResolutionException("All strategies failed for $videoId ($songTitle)")
+            //
+            // This is the path users hit when YouTube declines to serve audio to
+            // an unauthenticated InnerTube client. As of this writing every
+            // strategy below the first five returns 403 too, so there is no
+            // working fallback — the message is deliberately concrete about that
+            // rather than blaming the track, which is usually entirely playable
+            // in a browser.
+            Log.e(
+                TAG,
+                "All strategies exhausted for $videoId ($songTitle - $artistName); " +
+                    "YouTube did not return a playable stream"
+            )
+            throw StreamResolutionException(
+                "YouTube would not supply audio for \"$songTitle\". The track may be " +
+                    "unavailable without signing in, or YouTube may be blocking this app."
+            )
         }
     }
 
@@ -302,7 +317,10 @@ class YouTubeStreamResolver @Inject constructor(
         if (status != "OK") {
             val reason = response["playabilityStatus"]?.jsonObject
                 ?.get("reason")?.jsonPrimitive?.content ?: "unknown"
-            Log.d(TAG, "InnerTube $strategy: reason=$reason for $videoId")
+            // Log the reason the *server* gave. "UNPLAYABLE / Video unavailable"
+            // across every client is the signature of anti-bot hardening, and
+            // without this line that is indistinguishable from a bad video ID.
+            Log.w(TAG, "InnerTube $strategy refused $videoId: status=$status reason=$reason")
             return null
         }
 

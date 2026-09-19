@@ -10,6 +10,7 @@ import androidx.media3.exoplayer.offline.DownloadRequest
 import com.crank.music.data.local.SongDao
 import com.crank.music.data.local.toDomainModel
 import com.crank.music.data.local.toEntity
+import com.crank.music.data.remote.StreamResolver
 import com.crank.music.data.remote.YouTubeStreamResolver
 import com.crank.music.domain.model.DownloadState
 import com.crank.music.domain.model.Song
@@ -38,13 +39,22 @@ class DownloadRepositoryImpl @Inject constructor(
                 return
             }
 
-            // Resolve the actual stream URL (may be a video ID)
+            // Resolve the actual stream URL (may be a video ID). A YouTube URL
+            // that has passed its `expire` instant is re-resolved rather than
+            // handed to the download manager, which would otherwise fetch a 403
+            // and fail the download some seconds later with no explanation.
             val target = if (song.streamUrl.isNotBlank()) song.streamUrl else song.id
-            val streamUrl = if (target.startsWith("http://") || target.startsWith("https://")) {
+            val streamUrl = if (StreamResolver.isDirectlyPlayable(target)) {
                 target
             } else {
+                if (target.startsWith("http")) {
+                    Log.d(
+                        "CRANK_DOWNLOAD",
+                        "Stale stream URL for ${song.title}; re-resolving ${song.id}"
+                    )
+                }
                 try {
-                    streamResolver.getSongStreamUrl(target, song.title, song.artistName).url
+                    streamResolver.getSongStreamUrl(song.id, song.title, song.artistName).url
                 } catch (e: Exception) {
                     // Previously this fell back to `song.artworkUrl`, or failing
                     // that to a hardcoded soundhelix.com demo MP3. Downloading the
