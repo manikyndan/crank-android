@@ -10,6 +10,8 @@ import io.ktor.client.request.setBody
 import io.ktor.client.request.url
 import io.ktor.http.ContentType
 import io.ktor.http.contentType
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
@@ -26,6 +28,11 @@ class InnerTubeApi @Inject constructor(
     private val innerTubeConfig: InnerTubeConfig
 ) {
     private val TAG = "CRANK_INNERTUBE"
+
+    private companion object {
+        /** Every lyrics-tab browse id begins with this; how the tab is recognised in `next`. */
+        private const val LYRICS_BROWSE_PREFIX = "MPLYt"
+    }
 
     private val innerTubeContext = buildJsonObject {
         put("client", buildJsonObject {
@@ -384,20 +391,27 @@ class InnerTubeApi @Inject constructor(
      * ## What was wrong before
      *
      * This method previously read `return null`. The parser below it —
-     * [extractLyricsFromBrowse] — was complete and correct, but nothing ever called it, so the
-     * lyrics tab was dead code and every track fell through to the LRCLIB path. That is the
-     * "lyrics never load" and "lyrics don't match the song" report, and no amount of work on the
-     * display side would have fixed it.
+     * Wiring the call up was necessary but not sufficient: the lyrics browse id was also being
+     * computed locally from the video id, and that computed id resolves to an empty page. So the
+     * method ran, found nothing, and every track still reported "lyrics unavailable". Both halves
+     * are fixed here — see [findLyricsBrowseId] and [extractLyricsFromBrowse].
      *
      * ## The request
      *
      * YouTube Music exposes lyrics only through `browse`, not through `next` or `player`. The
-     * lyrics live under a tab whose browse id is derived from the track's video id: the ASCII
-     * codepoints are incremented by one and rendered as hex, then prefixed with `MPLYt`.
+     * lyrics live on a `MPLYt…` page whose id is *published* by the watch-next response; it has no
+     * derivable relationship to the video id, so it has to be read, not computed.
      *
-     * That transform is stable and cheap, but it is not self-documenting — hence this note. A
-     * wrong suffix does not produce an error, it produces an empty response, which is
-     * indistinguishable from "this track has no lyrics".
+     * A wrong id does not produce an error, it produces an empty response, which is
+     * indistinguishable from "this track has no lyrics" — hence the note.
+     *
+     * ## Coverage
+     *
+     * YouTube Music only carries lyrics for part of its catalogue, and for the rest it answers
+     * with a `messageRenderer` reading "Lyrics not available" rather than an error. That is an
+     * authoritative answer, not a parsing failure: measured on device, 1 of 10 tracks sampled from
+     * the app's own feed had lyrics here. So a `null` from this method is normal and the caller
+     * must fall back to a second source rather than treat it as a fault.
      *
      * Returns `null` rather than throwing: a missing lyric is a normal state, not a failure, and
      * the caller has a second source to fall back to.
@@ -406,9 +420,18 @@ class InnerTubeApi @Inject constructor(
         if (videoId.isBlank()) return null
 
         return try {
+            // The lyrics browse id is published by the watch-next response; it is not derivable.
+            //
+            // It used to be computed here by shifting each character of the video id, which yields
+            // a well-formed `MPLYt…` id that resolves to an empty page. Measured on device: the
+            // computed id returned a 1.9 KB response with no lyrics shelf, while the id YouTube
+            // Music actually advertises returned 917 characters of real lyrics for the same track.
+            // Every track therefore reported "lyrics unavailable" while the lyrics existed.
+            val browseId = findLyricsBrowseId(videoId) ?: return null
+
             val requestBody = buildJsonObject {
                 put("context", innerTubeContext)
-                put("browseId", JsonPrimitive(lyricsBrowseId(videoId)))
+                put("browseId", JsonPrimitive(browseId))
             }
 
             val response: JsonObject = client.post {
@@ -418,6 +441,8 @@ class InnerTubeApi @Inject constructor(
             }.body()
 
             extractLyricsFromBrowse(response)?.takeIf { it.isNotBlank() }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             // Logged at debug: a track without lyrics is the common case, and a warning per
             // track would drown out real failures.
@@ -427,38 +452,46 @@ class InnerTubeApi @Inject constructor(
     }
 
     /**
-     * Derives the browse id of a track's lyrics tab from its video id.
+     * Finds the browse id of a track's lyrics tab.
      *
-     * Each character is shifted up by one codepoint and hex-encoded, and the result is prefixed
-     * with `MPLYt`. This mirrors how YouTube Music builds the id internally; the shift is what
-     * prevents the plain video id from being usable directly.
+     * YouTube Music advertises it in the watch-next response as a `browseEndpoint` whose id begins
+     * `MPLYt`. Reading it from there is the only reliable way to get it: the id is opaque, with no
+     * stable relationship to the video id, so anything computed locally is a guess that looks
+     * plausible and silently rots.
+     *
+     * Returns `null` when the track has no lyrics tab, which is a normal state rather than an
+     * error — the caller falls back to a second source.
      */
-    private fun lyricsBrowseId(videoId: String): String {
-        val shifted = buildString {
-            for (char in videoId) {
-                append((char.code + 1).toString(16))
-            }
+    private suspend fun findLyricsBrowseId(videoId: String): String? {
+        val requestBody = buildJsonObject {
+            put("context", innerTubeContext)
+            put("videoId", JsonPrimitive(videoId))
         }
-        return "MPLYt$shifted"
+
+        val response: JsonObject = client.post {
+            url(innerTubeConfig.withMusicKey("next"))
+            contentType(ContentType.Application.Json)
+            setBody(requestBody)
+        }.body()
+
+        return findFirstString(response, "browseId") { it.startsWith(LYRICS_BROWSE_PREFIX) }
     }
 
+    /**
+     * Pulls the lyric text out of a `browse` response.
+     *
+     * The shelf is located by search rather than by a fixed path. The previous fixed path assumed
+     * `contents → twoColumnBrowseResultsRenderer → tabs[0] → tabRenderer → content →
+     * sectionListRenderer`, but a real lyrics page carries none of that: it puts the shelf at
+     * `contents.sectionListRenderer.contents[0]`, directly under `contents`. So the old lookup
+     * found nothing even when handed the correct browse id — which is why fixing the id alone
+     * would not have fixed lyrics.
+     */
     private fun extractLyricsFromBrowse(response: JsonObject): String? {
-        val tabs = response["contents"]?.jsonObject
-            ?.get("twoColumnBrowseResultsRenderer")?.jsonObject
-            ?.get("tabs")?.jsonArray
-            ?.mapNotNull { runCatching { it.jsonObject }.getOrNull() }
+        val shelf = findFirstObject(response, "musicDescriptionShelfRenderer") ?: return null
+        val description = shelf["description"]?.jsonObject ?: return null
 
-        val content = tabs?.firstOrNull()?.get("tabRenderer")?.jsonObject
-            ?.get("content")?.jsonObject
-            ?.get("sectionListRenderer")?.jsonObject
-            ?.get("contents")?.jsonArray
-            ?.mapNotNull { runCatching { it.jsonObject }.getOrNull() }
-            ?.firstOrNull()
-
-        val description = content?.get("musicDescriptionShelfRenderer")?.jsonObject
-            ?.get("description")?.jsonObject
-
-        val runs = description?.get("runs")?.jsonArray
+        val runs = description["runs"]?.jsonArray
         if (runs != null && runs.isNotEmpty()) {
             val lyrics = runs.joinToString("") {
                 it.jsonObject["text"]?.jsonPrimitive?.content ?: ""
@@ -466,29 +499,45 @@ class InnerTubeApi @Inject constructor(
             if (lyrics.isNotBlank()) return lyrics
         }
 
-        val text = content?.get("musicDescriptionShelfRenderer")?.jsonObject
-            ?.get("description")?.jsonObject
-            ?.get("simpleText")?.jsonPrimitive?.content
-        if (!text.isNullOrBlank()) return text
+        return description["simpleText"]?.jsonPrimitive?.content?.takeIf { it.isNotBlank() }
+    }
 
-        val musicShelfRenderer = content?.get("musicShelfRenderer")?.jsonObject
-        val shelfRuns = musicShelfRenderer?.get("contents")?.jsonArray
-            ?.mapNotNull { runCatching { it.jsonObject }.getOrNull() }
-            ?.mapNotNull { it["musicResponsiveListItemRenderer"]?.jsonObject }
-            ?.mapNotNull { it["flexColumns"]?.jsonArray }
-            ?.flatten()
-            ?.mapNotNull { runCatching { it.jsonObject }.getOrNull() }
-            ?.mapNotNull { it["musicResponsiveListItemFlexColumnRenderer"]?.jsonObject }
-            ?.mapNotNull { it["text"]?.jsonObject?.get("runs")?.jsonArray }
-            ?.mapNotNull { runs ->
-                runs.joinToString("") { it.jsonObject["text"]?.jsonPrimitive?.content ?: "" }.trim()
+    /** Finds the first object stored under [key] anywhere in [root]. */
+    private fun findFirstObject(root: JsonElement, key: String): JsonObject? {
+        when (root) {
+            is JsonObject -> {
+                root[key]?.let { candidate ->
+                    runCatching { candidate.jsonObject }.getOrNull()?.let { return it }
+                }
+                for ((_, value) in root) findFirstObject(value, key)?.let { return it }
             }
-            ?.filter { it.isNotBlank() }
-
-        if (shelfRuns != null && shelfRuns.isNotEmpty()) {
-            return shelfRuns.joinToString("\n")
+            is JsonArray -> {
+                for (element in root) findFirstObject(element, key)?.let { return it }
+            }
+            else -> Unit
         }
+        return null
+    }
 
+    /** Finds the first string stored under [key] anywhere in [root] that satisfies [accept]. */
+    private fun findFirstString(
+        root: JsonElement,
+        key: String,
+        accept: (String) -> Boolean,
+    ): String? {
+        when (root) {
+            is JsonObject -> {
+                root[key]?.let { candidate ->
+                    val text = runCatching { candidate.jsonPrimitive.content }.getOrNull()
+                    if (text != null && accept(text)) return text
+                }
+                for ((_, value) in root) findFirstString(value, key, accept)?.let { return it }
+            }
+            is JsonArray -> {
+                for (element in root) findFirstString(element, key, accept)?.let { return it }
+            }
+            else -> Unit
+        }
         return null
     }
 

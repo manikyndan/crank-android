@@ -1167,7 +1167,8 @@ class PlayerViewModel @Inject constructor(
      * actually playing — it cannot mismatch. LRCLIB is asked by *title and artist*, which covers
      * tracks YouTube Music has no lyrics for, but searches are fuzzy and can match a different
      * recording: a live version, a cover, or a same-titled song. That is how lyrics for the
-     * wrong track reach the screen.
+     * wrong track reach the screen. LRCLIB results are therefore scored on title, artist and
+     * duration and a non-matching title is rejected outright — see `LrclibLyricsSource`.
      *
      * So the exact source is tried first and the fuzzy one only as a fallback. The previous
      * order was forced: the YouTube Music path was a stub returning `null`, so every track went
@@ -1206,7 +1207,9 @@ class PlayerViewModel @Inject constructor(
         durationMs: Long,
     ): ParsedLyrics? {
         return try {
-            val httpResponse = musicRepository.searchLyrics(title, artist) ?: return null
+            // durationMs was already threaded here but unused; passing it is what lets the match
+            // reject a remix whose lyrics are paced differently from the track playing.
+            val httpResponse = musicRepository.searchLyrics(title, artist, durationMs) ?: return null
 
             // Synced lyrics first: real timings beat estimated ones.
             val synced = httpResponse.syncedLyrics

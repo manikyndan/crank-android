@@ -8,7 +8,8 @@ data class LyricsSearchResult(
     val trackName: String?,
     val artistName: String?,
     val albumName: String?,
-    val duration: Long?,
+    /** Length of the matched recording in milliseconds, or `null` when the source omits it. */
+    val durationMs: Long?,
     val plainLyrics: String?,
     val syncedLyrics: String?
 )
@@ -29,7 +30,18 @@ interface MusicRepository {
     suspend fun browseCollection(browseId: String): List<Song>
     suspend fun getSongStreamUrl(songId: String, songTitle: String = "", artistName: String = ""): StreamData
     suspend fun getSongDetails(songId: String): Song
-    suspend fun searchLyrics(trackName: String, artistName: String): LyricsSearchResult?
+    /**
+     * Best lyrics match for a track described by [trackName] / [artistName].
+     *
+     * [durationMs] is the length of the track actually playing. It is optional but worth passing:
+     * it is the only signal that separates an original from its remix, and without it a fuzzy
+     * title search can return the wrong version's lyrics. Pass `0` when unknown.
+     */
+    suspend fun searchLyrics(
+        trackName: String,
+        artistName: String,
+        durationMs: Long = 0L,
+    ): LyricsSearchResult?
 
     /**
      * Lyrics for the track with [videoId], or `null` when there are none.

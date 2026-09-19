@@ -11,13 +11,9 @@ import com.crank.music.domain.model.Album
 import com.crank.music.domain.model.Song
 import com.crank.music.domain.repository.LyricsSearchResult
 import com.crank.music.domain.repository.MusicRepository
+import com.crank.music.data.remote.lrclib.LrclibLyricsSource
 import io.ktor.client.HttpClient
-import io.ktor.client.call.body
-import io.ktor.client.request.get
-import io.ktor.client.request.parameter
-import io.ktor.client.statement.bodyAsText
 import kotlinx.coroutines.CancellationException
-import kotlinx.serialization.json.*
 import javax.inject.Inject
 
 class MusicRepositoryImpl @Inject constructor(
@@ -27,6 +23,10 @@ class MusicRepositoryImpl @Inject constructor(
     private val innerTubeApi: InnerTubeApi,
     private val httpClient: HttpClient
 ) : MusicRepository {
+
+    // Second-source lyrics. Kept here rather than inlined so the matching rules (query rewriting,
+    // candidate scoring) are testable without a network — see LrclibLyricsSource.
+    private val lrclib = LrclibLyricsSource(httpClient)
 
     // Caching layer (task #14). Short TTLs: search results are only worth ~2 min before they may be
     // stale, the home feed is heavier and changes less often so it sits at 10 min, and an album's
@@ -175,39 +175,13 @@ class MusicRepositoryImpl @Inject constructor(
         }
     }
 
-    override suspend fun searchLyrics(trackName: String, artistName: String): LyricsSearchResult? {
+    override suspend fun searchLyrics(
+        trackName: String,
+        artistName: String,
+        durationMs: Long,
+    ): LyricsSearchResult? {
         return try {
-            val url = "https://lrclib.net/api/search?track_name=${java.net.URLEncoder.encode(trackName, "UTF-8")}&artist_name=${java.net.URLEncoder.encode(artistName, "UTF-8")}"
-
-            val conn = java.net.URL(url).openConnection() as java.net.HttpURLConnection
-            conn.requestMethod = "GET"
-            conn.setRequestProperty("User-Agent", "CrankMusic/1.0")
-            conn.connectTimeout = 10000
-            conn.readTimeout = 10000
-
-            val code = conn.responseCode
-            if (code != 200) {
-                Log.d("CRANK_LYRICS", "LRCLIB returned $code for '$trackName'")
-                conn.disconnect()
-                return null
-            }
-
-            val text = conn.inputStream.bufferedReader().use { it.readText() }
-            conn.disconnect()
-
-            if (text.isBlank() || text == "[]") return null
-
-            val response = kotlinx.serialization.json.Json.parseToJsonElement(text) as? JsonArray ?: return null
-            val first = response.firstOrNull() ?: return null
-            val obj = first.jsonObject
-            LyricsSearchResult(
-                trackName = obj["trackName"]?.jsonPrimitive?.content,
-                artistName = obj["artistName"]?.jsonPrimitive?.content,
-                albumName = obj["albumName"]?.jsonPrimitive?.content,
-                duration = obj["duration"]?.jsonPrimitive?.long,
-                plainLyrics = obj["plainLyrics"]?.jsonPrimitive?.content,
-                syncedLyrics = obj["syncedLyrics"]?.jsonPrimitive?.content
-            )
+            lrclib.findLyrics(trackName, artistName, durationMs)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {

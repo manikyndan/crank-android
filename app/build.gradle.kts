@@ -106,6 +106,14 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
+    testOptions {
+        unitTests {
+            // Production code logs through android.util.Log, which the JVM test runtime stubs out
+            // and which throws by default. Returning defaults instead lets unit tests reach the
+            // code under test rather than dying on a log line.
+            isReturnDefaultValues = true
+        }
+    }
     buildFeatures {
         compose = true
         buildConfig = true
@@ -181,6 +189,9 @@ dependencies {
     implementation(libs.newpipeExtractor)
 
     testImplementation(libs.junit)
+    // MockEngine — lets the lyrics source be exercised over a canned HTTP response, so the
+    // "response thrown away during parsing" class of bug is caught without a network.
+    testImplementation(libs.ktor.client.mock)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
     // MigrationTestHelper — verifies each Migration against the exported schema
