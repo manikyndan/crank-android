@@ -1,7 +1,6 @@
 package com.crank.music.ui.components
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
@@ -31,10 +30,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.unit.dp
-import com.crank.music.ui.theme.ChampagneGold
-import com.crank.music.ui.theme.CharcoalSurface
-import com.crank.music.ui.theme.TextSecondary
-import com.crank.music.ui.theme.WarmWhite
 
 @Composable
 fun SearchBar(
@@ -48,19 +43,12 @@ fun SearchBar(
 ) {
     var isFocused by remember { mutableStateOf(false) }
 
-    val borderModifier = if (isFocused && !readOnly) {
-        Modifier.border(1.dp, ChampagneGold, RoundedCornerShape(12.dp))
-    } else {
-        Modifier
-    }
-
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .height(52.dp)
+            .height(48.dp)
             .clip(RoundedCornerShape(12.dp))
-            .background(CharcoalSurface)
-            .then(borderModifier)
+            .background(MaterialTheme.colorScheme.surfaceVariant)
             .then(if (onClick != null) Modifier.clickable { onClick() } else Modifier)
             .padding(horizontal = 16.dp),
         contentAlignment = Alignment.CenterStart
@@ -72,7 +60,7 @@ fun SearchBar(
             Icon(
                 imageVector = Icons.Default.Search,
                 contentDescription = "Search Icon",
-                tint = if (isFocused) ChampagneGold else TextSecondary,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.size(22.dp)
             )
 
@@ -83,7 +71,7 @@ fun SearchBar(
                     Text(
                         text = placeholder,
                         style = MaterialTheme.typography.bodyLarge,
-                        color = TextSecondary
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
                 BasicTextField(
@@ -92,8 +80,8 @@ fun SearchBar(
                     singleLine = true,
                     readOnly = readOnly,
                     enabled = onClick == null,
-                    textStyle = MaterialTheme.typography.bodyLarge.copy(color = WarmWhite),
-                    cursorBrush = SolidColor(ChampagneGold),
+                    textStyle = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onSurface),
+                    cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
                     modifier = Modifier
                         .fillMaxWidth()
                         .onFocusChanged { isFocused = it.isFocused }
@@ -108,7 +96,7 @@ fun SearchBar(
                     Icon(
                         imageVector = Icons.Default.Close,
                         contentDescription = "Clear Search",
-                        tint = TextSecondary,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.size(18.dp)
                     )
                 }
