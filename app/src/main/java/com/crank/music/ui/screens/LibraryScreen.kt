@@ -5,14 +5,11 @@ import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.scaleIn
-import androidx.compose.animation.scaleOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
@@ -81,7 +78,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
@@ -94,14 +90,6 @@ import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import coil3.compose.AsyncImage
 import com.crank.music.domain.model.Song
-import com.crank.music.ui.theme.ChampagneGold
-import com.crank.music.ui.theme.CharcoalElevated
-import com.crank.music.ui.theme.CharcoalSurface
-import com.crank.music.ui.theme.GoldDark
-import com.crank.music.ui.theme.ObsidianBlack
-import com.crank.music.ui.theme.TextSecondary
-import com.crank.music.ui.theme.TextTertiary
-import com.crank.music.ui.theme.WarmWhite
 import com.crank.music.ui.viewmodel.AlbumItem
 import com.crank.music.ui.viewmodel.ArtistItem
 import com.crank.music.ui.viewmodel.LibrarySection
@@ -125,7 +113,7 @@ fun LibraryScreen(
     val sections = LibrarySection.ordered
 
     Box(modifier = Modifier.fillMaxSize()) {
-        Column(modifier = Modifier.fillMaxSize().background(ObsidianBlack)) {
+        Column(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
             LibraryTopBar(
                 isGridView = uiState.isGridView,
                 isMultiSelectMode = uiState.isMultiSelectMode,
@@ -155,31 +143,31 @@ fun LibraryScreen(
                 items(sections) { section ->
                     val isSelected = section == uiState.selectedSection
                     val bgColor by animateColorAsState(
-                        targetValue = if (isSelected) ChampagneGold else CharcoalSurface,
+                        targetValue = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
                         animationSpec = tween(200), label = "bg"
                     )
                     val textColor by animateColorAsState(
-                        targetValue = if (isSelected) ObsidianBlack else WarmWhite,
+                        targetValue = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
                         animationSpec = tween(200), label = "text"
                     )
 
-                    Surface(
+                    Box(
                         modifier = Modifier
-                            .clip(RoundedCornerShape(20.dp))
+                            .clip(RoundedCornerShape(50))
+                            .background(bgColor)
                             .clickable {
                                 libraryViewModel.selectSection(section)
                                 view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
-                            },
-                        color = bgColor,
-                        shape = RoundedCornerShape(20.dp)
+                            }
+                            .padding(horizontal = 16.dp, vertical = 8.dp),
+                        contentAlignment = Alignment.Center
                     ) {
                         Text(
                             text = section.label,
                             style = MaterialTheme.typography.labelLarge.copy(
-                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+                                fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal
                             ),
-                            color = textColor,
-                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp)
+                            color = textColor
                         )
                     }
                 }
@@ -266,10 +254,9 @@ fun LibraryScreen(
         ) {
             Surface(
                 modifier = Modifier
-                    .size(60.dp)
-                    .shadow(8.dp, CircleShape),
+                    .size(60.dp),
                 shape = CircleShape,
-                color = ChampagneGold,
+                color = MaterialTheme.colorScheme.primary,
                 onClick = {
                     libraryViewModel.showCreateSheet()
                     view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
@@ -279,7 +266,7 @@ fun LibraryScreen(
                     Icon(
                         imageVector = Icons.Default.Add,
                         contentDescription = "Create Playlist",
-                        tint = ObsidianBlack,
+                        tint = MaterialTheme.colorScheme.onPrimary,
                         modifier = Modifier.size(30.dp)
                     )
                 }
@@ -354,19 +341,19 @@ private fun LibraryTopBar(
         if (isMultiSelectMode) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = onClearSelection) {
-                    Icon(Icons.Default.Close, "Cancel", tint = WarmWhite, modifier = Modifier.size(22.dp))
+                    Icon(Icons.Default.Close, "Cancel", tint = MaterialTheme.colorScheme.onBackground, modifier = Modifier.size(22.dp))
                 }
                 Text(
                     text = "$selectedCount selected",
                     style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
-                    color = ChampagneGold
+                    color = MaterialTheme.colorScheme.primary
                 )
             }
         } else {
             Text(
                 text = "Your Library",
-                style = MaterialTheme.typography.displayLarge,
-                color = WarmWhite
+                style = MaterialTheme.typography.headlineLarge,
+                color = MaterialTheme.colorScheme.onBackground
             )
         }
 
@@ -375,7 +362,7 @@ private fun LibraryTopBar(
                 Icon(
                     imageVector = Icons.Default.CheckCircle,
                     contentDescription = "Multi-select",
-                    tint = if (isMultiSelectMode) ChampagneGold else TextSecondary,
+                    tint = if (isMultiSelectMode) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.size(22.dp)
                 )
             }
@@ -383,7 +370,7 @@ private fun LibraryTopBar(
                 Icon(
                     imageVector = Icons.AutoMirrored.Filled.ViewList,
                     contentDescription = "Sort & Filter",
-                    tint = TextSecondary,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.size(22.dp)
                 )
             }
@@ -391,7 +378,7 @@ private fun LibraryTopBar(
                 Icon(
                     imageVector = if (isGridView) Icons.AutoMirrored.Filled.ViewList else Icons.Default.ViewModule,
                     contentDescription = "Toggle View",
-                    tint = TextSecondary,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.size(22.dp)
                 )
             }
@@ -572,7 +559,7 @@ private fun ArtistsSection(
                 Text(
                     text = "$letter",
                     style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
-                    color = ChampagneGold,
+                    color = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp)
                 )
             }
@@ -655,7 +642,7 @@ private fun DownloadedSection(
                 Text(
                     text = "${songs.size} songs downloaded",
                     style = MaterialTheme.typography.labelLarge,
-                    color = TextSecondary,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp)
                 )
             }
@@ -699,9 +686,9 @@ private fun CreatePlaylistCard(onClick: () -> Unit) {
             .height(70.dp)
             .clip(RoundedCornerShape(12.dp))
             .clickable { onClick() },
-        color = CharcoalSurface,
+        color = MaterialTheme.colorScheme.surfaceVariant,
         shape = RoundedCornerShape(12.dp),
-        border = BorderStroke(1.dp, ChampagneGold.copy(alpha = 0.3f))
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.3f))
     ) {
         Row(
             modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
@@ -710,13 +697,13 @@ private fun CreatePlaylistCard(onClick: () -> Unit) {
             Surface(
                 modifier = Modifier.size(50.dp),
                 shape = RoundedCornerShape(8.dp),
-                color = ChampagneGold.copy(alpha = 0.15f)
+                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
             ) {
                 Box(contentAlignment = Alignment.Center) {
                     Icon(
                         imageVector = Icons.Default.Add,
                         contentDescription = null,
-                        tint = ChampagneGold,
+                        tint = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.size(26.dp)
                     )
                 }
@@ -726,12 +713,12 @@ private fun CreatePlaylistCard(onClick: () -> Unit) {
                 Text(
                     text = "Create Playlist",
                     style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                    color = WarmWhite
+                    color = MaterialTheme.colorScheme.onBackground
                 )
                 Text(
                     text = "Build your own collection",
                     style = MaterialTheme.typography.labelSmall,
-                    color = TextSecondary
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
         }
@@ -750,10 +737,9 @@ private fun LibraryPlaylistMiniCard(
     ) {
         Surface(
             modifier = Modifier
-                .size(140.dp)
-                .shadow(6.dp, RoundedCornerShape(12.dp)),
+                .size(140.dp),
             shape = RoundedCornerShape(12.dp),
-            color = CharcoalSurface
+            color = MaterialTheme.colorScheme.surfaceVariant
         ) {
             Box {
                 AsyncImage(
@@ -768,14 +754,14 @@ private fun LibraryPlaylistMiniCard(
         Text(
             text = playlist.title,
             style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
-            color = WarmWhite,
+            color = MaterialTheme.colorScheme.onBackground,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis
         )
         Text(
             text = "${playlist.songCount} songs",
             style = MaterialTheme.typography.labelSmall,
-            color = TextTertiary
+            color = MaterialTheme.colorScheme.onSurfaceVariant
         )
     }
 }
@@ -793,10 +779,9 @@ private fun PlaylistGridCard(
         Surface(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(160.dp)
-                .shadow(6.dp, RoundedCornerShape(12.dp)),
+                .height(160.dp),
             shape = RoundedCornerShape(12.dp),
-            color = CharcoalSurface
+            color = MaterialTheme.colorScheme.surfaceVariant
         ) {
             Box {
                 AsyncImage(
@@ -811,14 +796,14 @@ private fun PlaylistGridCard(
         Text(
             text = playlist.title,
             style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
-            color = WarmWhite,
+            color = MaterialTheme.colorScheme.onBackground,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis
         )
         Text(
             text = "${playlist.songCount} songs",
             style = MaterialTheme.typography.labelSmall,
-            color = TextTertiary
+            color = MaterialTheme.colorScheme.onSurfaceVariant
         )
     }
 }
@@ -834,7 +819,7 @@ private fun SmartPlaylistCard(
             .height(80.dp)
             .clip(RoundedCornerShape(12.dp))
             .clickable { onClick() },
-        color = CharcoalSurface,
+        color = MaterialTheme.colorScheme.surfaceVariant,
         shape = RoundedCornerShape(12.dp)
     ) {
         Row(
@@ -844,7 +829,7 @@ private fun SmartPlaylistCard(
             Surface(
                 modifier = Modifier.size(56.dp),
                 shape = RoundedCornerShape(8.dp),
-                color = GoldDark.copy(alpha = 0.2f)
+                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)
             ) {
                 Box(contentAlignment = Alignment.Center) {
                     Text(
@@ -863,14 +848,14 @@ private fun SmartPlaylistCard(
                 Text(
                     text = smartPlaylist.title,
                     style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
-                    color = WarmWhite,
+                    color = MaterialTheme.colorScheme.onBackground,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
                 Text(
                     text = smartPlaylist.description,
                     style = MaterialTheme.typography.labelSmall,
-                    color = TextSecondary,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
@@ -878,7 +863,7 @@ private fun SmartPlaylistCard(
             Text(
                 text = "${smartPlaylist.songCount}",
                 style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                color = ChampagneGold
+                color = MaterialTheme.colorScheme.primary
             )
         }
     }
@@ -901,7 +886,7 @@ private fun ArtistRow(
         Surface(
             modifier = Modifier.size(48.dp),
             shape = CircleShape,
-            color = CharcoalSurface
+            color = MaterialTheme.colorScheme.surfaceVariant
         ) {
             AsyncImage(
                 model = artist.artworkUrl,
@@ -914,12 +899,12 @@ private fun ArtistRow(
             Text(
                 text = artist.name,
                 style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Medium),
-                color = WarmWhite
+                color = MaterialTheme.colorScheme.onBackground
             )
             Text(
                 text = "${artist.songCount} songs",
                 style = MaterialTheme.typography.labelSmall,
-                color = TextTertiary
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
     }
@@ -938,10 +923,9 @@ private fun AlbumGridCard(
         Surface(
             modifier = Modifier
                 .fillMaxWidth()
-                .aspectRatio(1f)
-                .shadow(6.dp, RoundedCornerShape(12.dp)),
+                .aspectRatio(1f),
             shape = RoundedCornerShape(12.dp),
-            color = CharcoalSurface
+            color = MaterialTheme.colorScheme.surfaceVariant
         ) {
             Box {
                 AsyncImage(
@@ -954,13 +938,13 @@ private fun AlbumGridCard(
                     modifier = Modifier
                         .align(Alignment.TopEnd)
                         .padding(6.dp),
-                    color = ObsidianBlack.copy(alpha = 0.7f),
+                    color = MaterialTheme.colorScheme.background.copy(alpha = 0.7f),
                     shape = RoundedCornerShape(4.dp)
                 ) {
                     Text(
                         text = album.year,
                         style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                        color = WarmWhite,
+                        color = MaterialTheme.colorScheme.onBackground,
                         modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                     )
                 }
@@ -970,14 +954,14 @@ private fun AlbumGridCard(
         Text(
             text = album.title,
             style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
-            color = WarmWhite,
+            color = MaterialTheme.colorScheme.onBackground,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis
         )
         Text(
             text = album.artistName,
             style = MaterialTheme.typography.labelSmall,
-            color = TextTertiary,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis
         )
@@ -993,7 +977,7 @@ private fun SongRow(
     onToggleSelect: (() -> Unit)? = null
 ) {
     val bgColor by animateColorAsState(
-        targetValue = if (isSelected) ChampagneGold.copy(alpha = 0.1f) else Color.Transparent,
+        targetValue = if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.1f) else Color.Transparent,
         animationSpec = tween(200), label = "bg"
     )
 
@@ -1018,9 +1002,9 @@ private fun SongRow(
                     .size(24.dp)
                     .scale(checkScale)
                     .clip(RoundedCornerShape(4.dp))
-                    .background(if (isSelected) ChampagneGold else Color.Transparent)
+                    .background(if (isSelected) MaterialTheme.colorScheme.primary else Color.Transparent)
                     .then(
-                        if (!isSelected) Modifier.border(1.5.dp, TextSecondary, RoundedCornerShape(4.dp)) else Modifier
+                        if (!isSelected) Modifier.border(1.5.dp, MaterialTheme.colorScheme.onSurfaceVariant, RoundedCornerShape(4.dp)) else Modifier
                     )
                     .clickable { onToggleSelect?.invoke() },
                 contentAlignment = Alignment.Center
@@ -1029,7 +1013,7 @@ private fun SongRow(
                     Icon(
                         imageVector = Icons.Default.Check,
                         contentDescription = "Selected",
-                        tint = ObsidianBlack,
+                        tint = MaterialTheme.colorScheme.onPrimary,
                         modifier = Modifier.size(16.dp)
                     )
                 }
@@ -1040,7 +1024,7 @@ private fun SongRow(
         Surface(
             modifier = Modifier.size(48.dp),
             shape = RoundedCornerShape(8.dp),
-            color = CharcoalSurface
+            color = MaterialTheme.colorScheme.surfaceVariant
         ) {
             AsyncImage(
                 model = song.artworkUrl,
@@ -1055,14 +1039,14 @@ private fun SongRow(
             Text(
                 text = song.title,
                 style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
-                color = WarmWhite,
+                color = MaterialTheme.colorScheme.onBackground,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
             Text(
                 text = song.artistName,
                 style = MaterialTheme.typography.labelSmall,
-                color = TextTertiary,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
@@ -1071,7 +1055,7 @@ private fun SongRow(
         Text(
             text = formatDuration(song.durationMs),
             style = MaterialTheme.typography.labelSmall,
-            color = TextTertiary
+            color = MaterialTheme.colorScheme.onSurfaceVariant
         )
     }
 }
@@ -1087,7 +1071,7 @@ private fun MultiSelectBar(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 20.dp, vertical = 12.dp),
-        color = CharcoalSurface,
+        color = MaterialTheme.colorScheme.surfaceVariant,
         shape = RoundedCornerShape(16.dp),
         shadowElevation = 8.dp
     ) {
@@ -1120,13 +1104,13 @@ private fun MultiSelectAction(
         Icon(
             imageVector = icon,
             contentDescription = label,
-            tint = ChampagneGold,
+            tint = MaterialTheme.colorScheme.primary,
             modifier = Modifier.size(20.dp)
         )
         Text(
             text = label,
             style = MaterialTheme.typography.labelSmall,
-            color = TextSecondary
+            color = MaterialTheme.colorScheme.onSurfaceVariant
         )
     }
 }
@@ -1160,14 +1144,14 @@ private fun CreatePlaylistModal(
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
-        containerColor = ObsidianBlack,
+        containerColor = MaterialTheme.colorScheme.background,
         dragHandle = {
             Box(
                 modifier = Modifier
                     .padding(vertical = 12.dp)
                     .width(40.dp)
                     .height(4.dp)
-                    .background(ChampagneGold, shape = RoundedCornerShape(2.dp))
+                    .background(MaterialTheme.colorScheme.primary, shape = RoundedCornerShape(2.dp))
             )
         }
     ) {
@@ -1179,14 +1163,14 @@ private fun CreatePlaylistModal(
             Text(
                 text = "Create Playlist",
                 style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.Bold),
-                color = WarmWhite,
+                color = MaterialTheme.colorScheme.onBackground,
                 modifier = Modifier.padding(bottom = 20.dp)
             )
 
             Text(
                 text = "COVER ART",
                 style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                color = TextSecondary,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(bottom = 8.dp)
             )
 
@@ -1209,14 +1193,14 @@ private fun CreatePlaylistModal(
                             .clickable { onCoverSelect(index) },
                         shape = CircleShape,
                         color = coverColors[index],
-                        border = if (isSelected) BorderStroke(3.dp, WarmWhite) else null
+                        border = if (isSelected) BorderStroke(3.dp, MaterialTheme.colorScheme.onBackground) else null
                     ) {
                         if (isSelected) {
                             Box(contentAlignment = Alignment.Center) {
                                 Icon(
                                     imageVector = Icons.Default.Check,
                                     contentDescription = null,
-                                    tint = WarmWhite,
+                                    tint = MaterialTheme.colorScheme.onBackground,
                                     modifier = Modifier.size(20.dp)
                                 )
                             }
@@ -1228,16 +1212,16 @@ private fun CreatePlaylistModal(
             OutlinedTextField(
                 value = name,
                 onValueChange = onNameChange,
-                placeholder = { Text("Playlist Name", color = TextSecondary) },
+                placeholder = { Text("Playlist Name", color = MaterialTheme.colorScheme.onSurfaceVariant) },
                 singleLine = true,
                 colors = OutlinedTextFieldDefaults.colors(
-                    focusedContainerColor = CharcoalSurface,
-                    unfocusedContainerColor = CharcoalSurface,
-                    focusedBorderColor = ChampagneGold,
+                    focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                    unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                    focusedBorderColor = MaterialTheme.colorScheme.primary,
                     unfocusedBorderColor = Color.Transparent,
-                    cursorColor = ChampagneGold,
-                    focusedTextColor = WarmWhite,
-                    unfocusedTextColor = WarmWhite
+                    cursorColor = MaterialTheme.colorScheme.primary,
+                    focusedTextColor = MaterialTheme.colorScheme.onBackground,
+                    unfocusedTextColor = MaterialTheme.colorScheme.onBackground
                 ),
                 shape = RoundedCornerShape(12.dp),
                 modifier = Modifier.fillMaxWidth()
@@ -1248,15 +1232,15 @@ private fun CreatePlaylistModal(
             OutlinedTextField(
                 value = description,
                 onValueChange = onDescriptionChange,
-                placeholder = { Text("Description (optional)", color = TextSecondary) },
+                placeholder = { Text("Description (optional)", color = MaterialTheme.colorScheme.onSurfaceVariant) },
                 colors = OutlinedTextFieldDefaults.colors(
-                    focusedContainerColor = CharcoalSurface,
-                    unfocusedContainerColor = CharcoalSurface,
-                    focusedBorderColor = ChampagneGold,
+                    focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                    unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                    focusedBorderColor = MaterialTheme.colorScheme.primary,
                     unfocusedBorderColor = Color.Transparent,
-                    cursorColor = ChampagneGold,
-                    focusedTextColor = WarmWhite,
-                    unfocusedTextColor = WarmWhite
+                    cursorColor = MaterialTheme.colorScheme.primary,
+                    focusedTextColor = MaterialTheme.colorScheme.onBackground,
+                    unfocusedTextColor = MaterialTheme.colorScheme.onBackground
                 ),
                 shape = RoundedCornerShape(12.dp),
                 modifier = Modifier.fillMaxWidth(),
@@ -1270,7 +1254,7 @@ private fun CreatePlaylistModal(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(12.dp))
-                    .background(CharcoalSurface)
+                    .background(MaterialTheme.colorScheme.surfaceVariant)
                     .clickable { onTogglePrivacy() }
                     .padding(16.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -1280,22 +1264,22 @@ private fun CreatePlaylistModal(
                     Text(
                         text = "Private Playlist",
                         style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Medium),
-                        color = WarmWhite
+                        color = MaterialTheme.colorScheme.onBackground
                     )
                     Text(
                         text = "Only you can see this playlist",
                         style = MaterialTheme.typography.labelSmall,
-                        color = TextSecondary
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
                 Switch(
                     checked = isPrivate,
                     onCheckedChange = { onTogglePrivacy() },
                     colors = SwitchDefaults.colors(
-                        checkedThumbColor = ObsidianBlack,
-                        checkedTrackColor = ChampagneGold,
-                        uncheckedThumbColor = TextSecondary,
-                        uncheckedTrackColor = CharcoalElevated
+                        checkedThumbColor = MaterialTheme.colorScheme.onPrimary,
+                        checkedTrackColor = MaterialTheme.colorScheme.primary,
+                        uncheckedThumbColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                        uncheckedTrackColor = MaterialTheme.colorScheme.surfaceVariant
                     )
                 )
             }
@@ -1308,10 +1292,10 @@ private fun CreatePlaylistModal(
                 },
                 enabled = name.isNotBlank(),
                 colors = ButtonDefaults.buttonColors(
-                    containerColor = ChampagneGold,
-                    contentColor = ObsidianBlack,
-                    disabledContainerColor = ChampagneGold.copy(alpha = 0.3f),
-                    disabledContentColor = ObsidianBlack.copy(alpha = 0.5f)
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    contentColor = MaterialTheme.colorScheme.onPrimary,
+                    disabledContainerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.3f),
+                    disabledContentColor = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.5f)
                 ),
                 shape = RoundedCornerShape(12.dp),
                 modifier = Modifier
@@ -1345,14 +1329,14 @@ private fun SortFilterModal(
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
-        containerColor = ObsidianBlack,
+        containerColor = MaterialTheme.colorScheme.background,
         dragHandle = {
             Box(
                 modifier = Modifier
                     .padding(vertical = 12.dp)
                     .width(40.dp)
                     .height(4.dp)
-                    .background(ChampagneGold, shape = RoundedCornerShape(2.dp))
+                    .background(MaterialTheme.colorScheme.primary, shape = RoundedCornerShape(2.dp))
             )
         }
     ) {
@@ -1364,14 +1348,14 @@ private fun SortFilterModal(
             Text(
                 text = "Sort & Filter",
                 style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.Bold),
-                color = WarmWhite,
+                color = MaterialTheme.colorScheme.onBackground,
                 modifier = Modifier.padding(bottom = 20.dp)
             )
 
             Text(
                 text = "SORT BY",
                 style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                color = TextSecondary,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(bottom = 8.dp)
             )
 
@@ -1385,7 +1369,7 @@ private fun SortFilterModal(
                         modifier = Modifier
                             .clip(RoundedCornerShape(20.dp))
                             .clickable { onSortSelect(option) },
-                        color = if (isSelected) ChampagneGold else CharcoalSurface,
+                        color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
                         shape = RoundedCornerShape(20.dp)
                     ) {
                         Text(
@@ -1393,7 +1377,7 @@ private fun SortFilterModal(
                             style = MaterialTheme.typography.labelLarge.copy(
                                 fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
                             ),
-                            color = if (isSelected) ObsidianBlack else TextSecondary,
+                            color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp)
                         )
                     }
@@ -1403,7 +1387,7 @@ private fun SortFilterModal(
             Text(
                 text = "FILTER BY",
                 style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                color = TextSecondary,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(bottom = 8.dp)
             )
 
@@ -1417,7 +1401,7 @@ private fun SortFilterModal(
                         modifier = Modifier
                             .clip(RoundedCornerShape(20.dp))
                             .clickable { onFilterSelect(option) },
-                        color = if (isSelected) ChampagneGold else CharcoalSurface,
+                        color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
                         shape = RoundedCornerShape(20.dp)
                     ) {
                         Text(
@@ -1425,7 +1409,7 @@ private fun SortFilterModal(
                             style = MaterialTheme.typography.labelLarge.copy(
                                 fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
                             ),
-                            color = if (isSelected) ObsidianBlack else TextSecondary,
+                            color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp)
                         )
                     }
@@ -1456,14 +1440,14 @@ private fun EmptyState(
         Text(
             text = title,
             style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold),
-            color = WarmWhite,
+            color = MaterialTheme.colorScheme.onBackground,
             textAlign = TextAlign.Center
         )
         Spacer(modifier = Modifier.height(8.dp))
         Text(
             text = subtitle,
             style = MaterialTheme.typography.bodyMedium,
-            color = TextSecondary,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center
         )
         Spacer(modifier = Modifier.height(24.dp))
@@ -1471,13 +1455,13 @@ private fun EmptyState(
             modifier = Modifier
                 .clip(RoundedCornerShape(25.dp))
                 .clickable { onCtaClick() },
-            color = ChampagneGold,
+            color = MaterialTheme.colorScheme.primary,
             shape = RoundedCornerShape(25.dp)
         ) {
             Text(
                 text = ctaText,
                 style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
-                color = ObsidianBlack,
+                color = MaterialTheme.colorScheme.onPrimary,
                 modifier = Modifier.padding(horizontal = 24.dp, vertical = 12.dp)
             )
         }
@@ -1501,14 +1485,14 @@ private fun SectionHeader(
             Text(
                 text = title,
                 style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
-                color = WarmWhite
+                color = MaterialTheme.colorScheme.onBackground
             )
             if (subtitle != null) {
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
                     text = subtitle,
                     style = MaterialTheme.typography.labelMedium,
-                    color = TextTertiary
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
         }
@@ -1516,7 +1500,7 @@ private fun SectionHeader(
             Text(
                 text = "See All",
                 style = MaterialTheme.typography.labelLarge,
-                color = ChampagneGold,
+                color = MaterialTheme.colorScheme.primary,
                 modifier = Modifier
                     .clip(RoundedCornerShape(8.dp))
                     .clickable { onClick() }
