@@ -104,19 +104,25 @@ import com.crank.music.ui.theme.TextTertiary
 import com.crank.music.ui.theme.WarmWhite
 import com.crank.music.ui.viewmodel.AlbumItem
 import com.crank.music.ui.viewmodel.ArtistItem
+import com.crank.music.ui.viewmodel.LibrarySection
 import com.crank.music.ui.viewmodel.LibraryViewModel
 import com.crank.music.ui.viewmodel.SmartPlaylist
+import com.crank.music.ui.viewmodel.toDomainModel
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun LibraryScreen(
     libraryViewModel: LibraryViewModel = hiltViewModel(),
     onSongSelect: (Song) -> Unit = {},
-    onPlaylistClick: (String) -> Unit = {}
+    onPlaylistClick: (String) -> Unit = {},
+    onSmartPlaylistClick: (String) -> Unit = onPlaylistClick,
+    onArtistClick: (String) -> Unit = {},
+    onAlbumClick: (com.crank.music.domain.model.Album) -> Unit = {},
+    onBrowseClick: () -> Unit = {}
 ) {
     val uiState by libraryViewModel.uiState.collectAsState()
     val view = LocalView.current
-    val sections = listOf("All", "Playlists", "Artists", "Albums", "Songs", "Downloaded", "Recently Added")
+    val sections = LibrarySection.ordered
 
     Box(modifier = Modifier.fillMaxSize()) {
         Column(modifier = Modifier.fillMaxSize().background(ObsidianBlack)) {
@@ -132,7 +138,6 @@ fun LibraryScreen(
                     libraryViewModel.toggleMultiSelectMode()
                     view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
                 },
-                onSearchClick = { },
                 onSortFilterClick = {
                     libraryViewModel.showSortFilterSheet()
                     view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
@@ -169,7 +174,7 @@ fun LibraryScreen(
                         shape = RoundedCornerShape(20.dp)
                     ) {
                         Text(
-                            text = section,
+                            text = section.label,
                             style = MaterialTheme.typography.labelLarge.copy(
                                 fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
                             ),
@@ -189,7 +194,7 @@ fun LibraryScreen(
                 label = "section"
             ) { section ->
                 when (section) {
-                    "Playlists" -> PlaylistsSection(
+                    LibrarySection.PLAYLISTS -> PlaylistsSection(
                         playlists = uiState.playlists,
                         smartPlaylists = uiState.smartPlaylists,
                         isGridView = uiState.isGridView,
@@ -198,17 +203,22 @@ fun LibraryScreen(
                             view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
                         },
                         onPlaylistClick = { onPlaylistClick(it) },
-                        onSmartPlaylistClick = { view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY) }
+                        onSmartPlaylistClick = { onSmartPlaylistClick(it) }
                     )
-                    "Artists" -> ArtistsSection(
+                    LibrarySection.ARTISTS -> ArtistsSection(
                         artists = uiState.artists,
-                        onArtistClick = { view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY) }
+                        onArtistClick = { onArtistClick(it) }
                     )
-                    "Albums" -> AlbumsSection(
+                    LibrarySection.ALBUMS -> AlbumsSection(
                         albums = uiState.albums,
-                        onAlbumClick = { view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY) }
+                        onAlbumClick = { album: AlbumItem ->
+                            // The album route takes title + artist, not an id: the search
+                            // backend resolves albums by text. Passing the id we grouped on
+                            // would make the destination search for the id itself.
+                            onAlbumClick(album.toDomainModel())
+                        }
                     )
-                    "Songs" -> SongsSection(
+                    LibrarySection.SONGS -> SongsSection(
                         songs = libraryViewModel.getFilteredSongs(),
                         isGridView = uiState.isGridView,
                         isMultiSelectMode = uiState.isMultiSelectMode,
@@ -216,15 +226,17 @@ fun LibraryScreen(
                         onSongSelect = onSongSelect,
                         onToggleSelect = { libraryViewModel.toggleItemSelection(it) }
                     )
-                    "Downloaded" -> DownloadedSection(
+                    LibrarySection.DOWNLOADED -> DownloadedSection(
                         songs = uiState.downloadedSongs,
-                        onSongSelect = onSongSelect
+                        onSongSelect = onSongSelect,
+                        onFindMusic = onBrowseClick
                     )
-                    "Recently Added" -> RecentlyAddedSection(
+                    LibrarySection.RECENTLY_ADDED -> RecentlyAddedSection(
                         songs = uiState.recentlyAdded,
-                        onSongSelect = onSongSelect
+                        onSongSelect = onSongSelect,
+                        onFindMusic = onBrowseClick
                     )
-                    else -> AllSection(
+                    LibrarySection.ALL -> AllSection(
                         playlists = uiState.playlists,
                         smartPlaylists = uiState.smartPlaylists,
                         songs = uiState.songs,
@@ -236,8 +248,12 @@ fun LibraryScreen(
                             view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
                         },
                         onPlaylistClick = { onPlaylistClick(it) },
+                        onSmartPlaylistClick = { onSmartPlaylistClick(it) },
                         onSongSelect = onSongSelect,
-                        onToggleSelect = { libraryViewModel.toggleItemSelection(it) }
+                        onToggleSelect = { libraryViewModel.toggleItemSelection(it) },
+                        onSeeAllPlaylists = { libraryViewModel.selectSection(LibrarySection.PLAYLISTS) },
+                        onSeeAllSongs = { libraryViewModel.selectSection(LibrarySection.SONGS) },
+                        onFindMusic = onBrowseClick
                     )
                 }
             }
@@ -277,12 +293,10 @@ fun LibraryScreen(
                     libraryViewModel.selectAll()
                     view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
                 },
-                onAddToPlaylist = { view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY) },
                 onDownload = {
                     libraryViewModel.downloadSelectedSongs()
                     view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
                 },
-                onShare = { view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY) },
                 onDelete = {
                     libraryViewModel.deleteSelectedSongs()
                     view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
@@ -327,7 +341,6 @@ private fun LibraryTopBar(
     selectedCount: Int,
     onToggleView: () -> Unit,
     onToggleMultiSelect: () -> Unit,
-    onSearchClick: () -> Unit,
     onSortFilterClick: () -> Unit,
     onClearSelection: () -> Unit
 ) {
@@ -396,16 +409,30 @@ private fun AllSection(
     selectedItems: Set<String>,
     onCreatePlaylist: () -> Unit,
     onPlaylistClick: (String) -> Unit,
+    onSmartPlaylistClick: (String) -> Unit,
     onSongSelect: (Song) -> Unit,
-    onToggleSelect: (String) -> Unit
+    onToggleSelect: (String) -> Unit,
+    onSeeAllPlaylists: () -> Unit,
+    onSeeAllSongs: () -> Unit,
+    onFindMusic: () -> Unit
 ) {
+    if (playlists.isEmpty() && smartPlaylists.isEmpty() && songs.isEmpty()) {
+        EmptyState(
+            title = "Your Library Is Empty",
+            subtitle = "Songs you like and playlists you create will appear here",
+            ctaText = "Find Music",
+            onCtaClick = onFindMusic
+        )
+        return
+    }
+
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(bottom = 120.dp)
     ) {
         if (playlists.isNotEmpty()) {
             item {
-                SectionHeader("Playlists", "See All", onClick = {})
+                SectionHeader("Playlists", "See All", onClick = onSeeAllPlaylists)
             }
             item {
                 LazyRow(
@@ -436,7 +463,10 @@ private fun AllSection(
                     horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     items(smartPlaylists) { smart ->
-                        SmartPlaylistCard(smartPlaylist = smart, onClick = {})
+                        SmartPlaylistCard(
+                            smartPlaylist = smart,
+                            onClick = { onSmartPlaylistClick(smart.id) }
+                        )
                     }
                 }
             }
@@ -445,7 +475,7 @@ private fun AllSection(
         if (songs.isNotEmpty()) {
             item {
                 Spacer(modifier = Modifier.height(24.dp))
-                SectionHeader("All Songs", "${songs.size} songs", onClick = {})
+                SectionHeader("All Songs", "${songs.size} songs", onClick = onSeeAllSongs)
             }
             items(songs.take(6)) { song ->
                 SongRow(
@@ -559,7 +589,7 @@ private fun ArtistsSection(
 @Composable
 private fun AlbumsSection(
     albums: List<AlbumItem>,
-    onAlbumClick: (String) -> Unit
+    onAlbumClick: (AlbumItem) -> Unit
 ) {
     LazyVerticalGrid(
         columns = GridCells.Fixed(2),
@@ -570,7 +600,7 @@ private fun AlbumsSection(
         items(albums) { album ->
             AlbumGridCard(
                 album = album,
-                onClick = { onAlbumClick(album.id) }
+                onClick = { onAlbumClick(album) }
             )
         }
     }
@@ -606,14 +636,15 @@ private fun SongsSection(
 @Composable
 private fun DownloadedSection(
     songs: List<Song>,
-    onSongSelect: (Song) -> Unit
+    onSongSelect: (Song) -> Unit,
+    onFindMusic: () -> Unit
 ) {
     if (songs.isEmpty()) {
         EmptyState(
             title = "No Downloaded Songs",
             subtitle = "Songs you download will appear here for offline listening",
             ctaText = "Find Music",
-            onCtaClick = {}
+            onCtaClick = onFindMusic
         )
     } else {
         LazyColumn(
@@ -638,14 +669,15 @@ private fun DownloadedSection(
 @Composable
 private fun RecentlyAddedSection(
     songs: List<Song>,
-    onSongSelect: (Song) -> Unit
+    onSongSelect: (Song) -> Unit,
+    onFindMusic: () -> Unit
 ) {
     if (songs.isEmpty()) {
         EmptyState(
             title = "Nothing Recently Added",
             subtitle = "Songs you add to your library will appear here",
             ctaText = "Find Music",
-            onCtaClick = {}
+            onCtaClick = onFindMusic
         )
     } else {
         LazyColumn(
@@ -1048,9 +1080,7 @@ private fun SongRow(
 private fun MultiSelectBar(
     selectedCount: Int,
     onSelectAll: () -> Unit,
-    onAddToPlaylist: () -> Unit,
     onDownload: () -> Unit,
-    onShare: () -> Unit,
     onDelete: () -> Unit
 ) {
     Surface(
@@ -1068,9 +1098,7 @@ private fun MultiSelectBar(
             horizontalArrangement = Arrangement.SpaceEvenly
         ) {
             MultiSelectAction(icon = Icons.Default.Check, label = "All", onClick = onSelectAll)
-            MultiSelectAction(icon = Icons.Default.Add, label = "Playlist", onClick = onAddToPlaylist)
             MultiSelectAction(icon = Icons.Default.ViewModule, label = "Download", onClick = onDownload)
-            MultiSelectAction(icon = Icons.Default.Share, label = "Share", onClick = onShare)
             MultiSelectAction(icon = Icons.Default.Delete, label = "Delete", onClick = onDelete)
         }
     }

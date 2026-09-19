@@ -160,15 +160,26 @@ fun MusicDNAScreen(
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(bottom = 32.dp)
         ) {
-            item {
-                Spacer(modifier = Modifier.height(8.dp))
-                RadarChartSection(
-                    dimensions = uiState.radarDimensions,
-                    onDimensionClick = { dimension ->
-                        statsViewModel.selectDimension(dimension)
-                        view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
-                    }
-                )
+            // Nothing is shown until the user has actually played something. Every metric on
+            // this screen is derived from playback history, so with an empty history the
+            // honest answer is "come back after you listen" — not a grid of zeroes dressed up
+            // as a profile, and certainly not the fixed numbers this screen used to display.
+            if (uiState.isLoaded && !uiState.hasListeningHistory) {
+                item { EmptyDnaState() }
+                return@LazyColumn
+            }
+
+            if (uiState.radarDimensions.isNotEmpty()) {
+                item {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    RadarChartSection(
+                        dimensions = uiState.radarDimensions,
+                        onDimensionClick = { dimension ->
+                            statsViewModel.selectDimension(dimension)
+                            view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+                        }
+                    )
+                }
             }
 
             item {
@@ -212,6 +223,32 @@ fun MusicDNAScreen(
         BadgeDetailDialog(
             badge = badge,
             onDismiss = { showBadgeDetail = null }
+        )
+    }
+}
+
+@Composable
+private fun EmptyDnaState() {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 32.dp, vertical = 64.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text(text = "\uD83E\uDDEC", fontSize = 56.sp)
+        Spacer(modifier = Modifier.height(16.dp))
+        Text(
+            text = "No Listening History Yet",
+            style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold),
+            color = WarmWhite,
+            textAlign = TextAlign.Center
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(
+            text = "Play a few songs and your stats will build up here.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = TextSecondary,
+            textAlign = TextAlign.Center
         )
     }
 }

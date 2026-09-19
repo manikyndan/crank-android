@@ -240,6 +240,21 @@ fun MainScreen(
                     },
                     onPlaylistClick = { playlistId ->
                         navController.navigate("playlist_detail/$playlistId")
+                    },
+                    onArtistClick = { artistName ->
+                        navController.navigate("artist_detail/${android.net.Uri.encode(artistName)}")
+                    },
+                    onAlbumClick = { album ->
+                        navController.navigate(albumRoute(album))
+                    },
+                    onBrowseClick = {
+                        // There is no Search tab in the bottom bar; Explore is where the
+                        // search field lives. Sending an empty library to Explore is the
+                        // closest real destination, so the "Find Music" button takes you
+                        // somewhere that can actually help.
+                        navController.navigate(NavItem.Explore.route) {
+                            popUpTo(NavItem.Home.route)
+                        }
                     }
                 )
             }

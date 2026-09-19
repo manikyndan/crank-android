@@ -146,7 +146,10 @@ class SearchViewModel @Inject constructor(
                                         id = "album_${artistSongs.first().id}",
                                         title = artistSongs.first().let { "${it.title} - Single" },
                                         artistName = artist,
-                                        releaseYear = "2024",
+                                        // No release year is available from the search layer.
+                                        // Blank makes the UI omit the badge instead of printing
+                                        // a year that has nothing to do with the release.
+                                        releaseYear = "",
                                         artworkUrl = artistSongs.first().artworkUrl,
                                         trackCount = artistSongs.size
                                     )

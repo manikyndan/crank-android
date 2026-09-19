@@ -11,6 +11,7 @@ import com.crank.music.data.local.SongDao
 import com.crank.music.data.local.toDomainModel
 import com.crank.music.data.local.toEntity
 import com.crank.music.data.remote.StreamResolver
+import com.crank.music.domain.model.DownloadProgress
 import com.crank.music.domain.model.DownloadState
 import com.crank.music.domain.model.Song
 import com.crank.music.domain.repository.DownloadRepository
@@ -18,6 +19,7 @@ import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 @OptIn(UnstableApi::class)
@@ -125,6 +127,88 @@ class DownloadRepositoryImpl @Inject constructor(
         awaitClose {
             downloadManager.removeListener(listener)
         }
+    }
+
+    override fun getActiveDownloads(): Flow<List<DownloadProgress>> = callbackFlow {
+        suspend fun snapshot() {
+            val items = mutableListOf<DownloadProgress>()
+            try {
+                // `DownloadCursor` is a forward-only reader over the download index. It is
+                // Closeable, so it is always closed — an open cursor holds a database
+                // connection and Media3 will eventually fail new writes.
+                downloadManager.downloadIndex.getDownloads().use { cursor ->
+                    while (cursor.moveToNext()) {
+                        val download = cursor.download
+                        val songId = download.request.id
+                        val metadata = try {
+                            songDao.getSongById(songId)
+                        } catch (e: Exception) {
+                            null
+                        }
+
+                        items += DownloadProgress(
+                            songId = songId,
+                            title = metadata?.title
+                                ?: download.request.data?.toString(Charsets.UTF_8).orEmpty(),
+                            artistName = metadata?.artistName.orEmpty(),
+                            artworkUrl = metadata?.artworkUrl.orEmpty(),
+                            state = mapState(download.state),
+                            downloadedBytes = download.bytesDownloaded,
+                            totalBytes = download.contentLength,
+                        )
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e("CRANK_DOWNLOAD", "Failed to read download index: ${e.message}")
+            }
+
+            trySend(items)
+        }
+
+        val listener = object : DownloadManager.Listener {
+            override fun onDownloadChanged(
+                downloadManager: DownloadManager,
+                download: Download,
+                finalException: Exception?
+            ) {
+                launch { snapshot() }
+            }
+
+            override fun onDownloadRemoved(downloadManager: DownloadManager, download: Download) {
+                launch { snapshot() }
+            }
+        }
+
+        downloadManager.addListener(listener)
+        snapshot()
+
+        awaitClose {
+            downloadManager.removeListener(listener)
+        }
+    }
+
+    /**
+     * Media3 1.4.1 has no per-download pause: `DownloadManager` exposes only global
+     * [DownloadManager.pauseDownloads] / [DownloadManager.resumeDownloads]. The repository
+     * interface therefore mirrors that, and the UI shows the control as global rather than
+     * pretending it applies to a single row. Previously these were per-id methods that only
+     * edited a local list and never touched the download at all.
+     */
+    override suspend fun pauseAllDownloads() {
+        downloadManager.pauseDownloads()
+    }
+
+    override suspend fun resumeAllDownloads() {
+        downloadManager.resumeDownloads()
+    }
+
+    override fun downloadsArePaused(): Boolean = downloadManager.downloadsPaused
+
+    override suspend fun retryDownload(songId: String) {
+        // A failed download is re-queued by removing and re-adding it, because Media3 keeps
+        // the terminal FAILED state in the index otherwise. The original stream URL is not
+        // cached here, so the caller re-issues downloadSong with the Song model.
+        downloadManager.removeDownload(songId)
     }
 
     private fun mapState(state: Int): DownloadState {

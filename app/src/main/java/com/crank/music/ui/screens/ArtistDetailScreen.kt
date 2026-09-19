@@ -122,13 +122,18 @@ fun ArtistDetailScreen(
                     overflow = TextOverflow.Ellipsis
                 )
 
-                Spacer(modifier = Modifier.height(4.dp))
-
-                Text(
-                    text = "${artist?.followerCount ?: 0} listeners",
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = TextSecondary
-                )
+                // The listener count is only rendered when the API actually provided one.
+                // The search layer does not, so this line is normally absent — better than
+                // a permanent "0 listeners" that reads as a real measurement of zero.
+                val listenerCount = artist?.followerCount ?: 0L
+                if (listenerCount > 0L) {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = "$listenerCount listeners",
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = TextSecondary
+                    )
+                }
 
                 Spacer(modifier = Modifier.height(16.dp))
 

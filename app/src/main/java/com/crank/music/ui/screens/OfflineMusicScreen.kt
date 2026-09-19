@@ -166,14 +166,6 @@ fun OfflineMusicScreen(
                 SmartOfflineHubSection(
                     totalStorage = uiState.totalStorage,
                     usedStorage = uiState.usedStorage,
-                    playlistCount = uiState.playlists.size,
-                    albumCount = uiState.albums.size,
-                    artistCount = uiState.artists.size,
-                    songCount = uiState.songs.size,
-                    expandedSection = uiState.expandedSection,
-                    playlists = uiState.playlists,
-                    albums = uiState.albums,
-                    artists = uiState.artists,
                     songs = uiState.songs,
                     swipedItemId = uiState.swipedItemId,
                     onToggleSection = {
@@ -230,12 +222,13 @@ fun OfflineMusicScreen(
             item {
                 DownloadManagerSection(
                     activeDownloads = uiState.activeDownloads,
-                    onPause = {
-                        viewModel.pauseDownload(it)
-                        view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
-                    },
-                    onResume = {
-                        viewModel.resumeDownload(it)
+                    downloadsPaused = uiState.downloadsPaused,
+                    onTogglePauseAll = {
+                        if (uiState.downloadsPaused) {
+                            viewModel.resumeAllDownloads()
+                        } else {
+                            viewModel.pauseAllDownloads()
+                        }
                         view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
                     },
                     onCancel = {
@@ -256,14 +249,6 @@ fun OfflineMusicScreen(
 private fun SmartOfflineHubSection(
     totalStorage: Long,
     usedStorage: Long,
-    playlistCount: Int,
-    albumCount: Int,
-    artistCount: Int,
-    songCount: Int,
-    expandedSection: String?,
-    playlists: List<com.crank.music.ui.viewmodel.OfflineItem>,
-    albums: List<com.crank.music.ui.viewmodel.OfflineItem>,
-    artists: List<com.crank.music.ui.viewmodel.OfflineItem>,
     songs: List<com.crank.music.ui.viewmodel.OfflineItem>,
     swipedItemId: String?,
     onToggleSection: (String) -> Unit,
@@ -271,43 +256,33 @@ private fun SmartOfflineHubSection(
     onRemoveItem: (String) -> Unit,
     onCancelSwipe: () -> Unit
 ) {
+    // Only downloaded songs are listed. The previous version also offered Playlists, Albums
+    // and Artists categories, but every entry in them was hardcoded fiction — the download
+    // layer only ever stores individual tracks, so those categories had nothing real to show.
+    val expanded = remember { mutableStateOf(true) }
+
     Column(modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp)) {
-        SectionHeader(icon = Icons.Default.Folder, title = "Smart Offline Hub")
+        SectionHeader(icon = Icons.Default.Folder, title = "Offline Music")
         Spacer(modifier = Modifier.height(14.dp))
 
         StorageIndicator(totalStorage = totalStorage, usedStorage = usedStorage)
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        val sections = listOf(
-            Triple("playlists", "Playlists", playlistCount),
-            Triple("albums", "Albums", albumCount),
-            Triple("artists", "Artists", artistCount),
-            Triple("songs", "Songs", songCount)
+        OfflineCategoryCard(
+            title = "Songs",
+            count = songs.size,
+            isExpanded = expanded.value,
+            items = songs,
+            swipedItemId = swipedItemId,
+            onToggle = {
+                expanded.value = !expanded.value
+                onToggleSection("songs")
+            },
+            onSwiped = onSwiped,
+            onRemoveItem = onRemoveItem,
+            onCancelSwipe = onCancelSwipe
         )
-
-        sections.forEach { (key, label, count) ->
-            OfflineCategoryCard(
-                title = label,
-                count = count,
-                isExpanded = expandedSection == key,
-                items = when (key) {
-                    "playlists" -> playlists
-                    "albums" -> albums
-                    "artists" -> artists
-                    "songs" -> songs
-                    else -> emptyList()
-                },
-                swipedItemId = swipedItemId,
-                onToggle = {
-                    onToggleSection(key)
-                },
-                onSwiped = onSwiped,
-                onRemoveItem = onRemoveItem,
-                onCancelSwipe = onCancelSwipe
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-        }
     }
 }
 
@@ -913,8 +888,8 @@ private fun AutoDownloadRuleRow(
 @Composable
 private fun DownloadManagerSection(
     activeDownloads: List<com.crank.music.ui.viewmodel.DownloadTask>,
-    onPause: (String) -> Unit,
-    onResume: (String) -> Unit,
+    downloadsPaused: Boolean,
+    onTogglePauseAll: () -> Unit,
     onCancel: (String) -> Unit,
     onRetry: (String) -> Unit
 ) {
@@ -963,12 +938,46 @@ private fun DownloadManagerSection(
                 }
             }
         } else {
+            // Pause is a single control for the whole queue: Media3 1.4.1 has no per-download
+            // pause, so per-row buttons would change nothing. Retry and cancel stay per-row
+            // because removing from the index genuinely is per-download.
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .clickable { onTogglePauseAll() },
+                color = CharcoalSurface,
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = if (downloadsPaused) Icons.Default.PlayArrow else Icons.Default.Pause,
+                        contentDescription = null,
+                        tint = ChampagneGold,
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Text(
+                        text = if (downloadsPaused) "Resume All Downloads" else "Pause All Downloads",
+                        style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
+                        color = WarmWhite
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+
             activeDownloads.forEach { task ->
                 DownloadTaskCard(
                     task = task,
                     pulseAlpha = pulseAlpha,
-                    onPause = { onPause(task.id) },
-                    onResume = { onResume(task.id) },
+                    onPause = onTogglePauseAll,
+                    onResume = onTogglePauseAll,
                     onCancel = { onCancel(task.id) },
                     onRetry = { onRetry(task.id) }
                 )
