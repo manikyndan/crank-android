@@ -22,9 +22,11 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -285,7 +287,15 @@ private fun ExploreHeader(
                     onValueChange = onQueryChange,
                     modifier = Modifier.weight(1f),
                     placeholder = {
-                        Text("Search songs, artists, albums...", color = TextTertiary)
+                        // maxLines/softWrap are set explicitly: the placeholder does not inherit
+                        // singleLine from the field, so with a narrow field it wrapped to two
+                        // lines and doubled the height of the control.
+                        Text(
+                            "Search songs, artists, albums...",
+                            color = TextTertiary,
+                            maxLines = 1,
+                            softWrap = false
+                        )
                     },
                     leadingIcon = {
                         Icon(Icons.Default.Search, "Search", tint = TextSecondary, modifier = Modifier.size(20.dp))
@@ -298,7 +308,13 @@ private fun ExploreHeader(
                         }
                     },
                     colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = ChampagneGold,
+                        // The focus border used to be the accent colour. On this palette the
+                        // accent is a saturated red, so focusing the field drew a red ring that
+                        // is indistinguishable from the error state — it read as "this input is
+                        // invalid" the moment you tapped it. Focus is now shown by lifting the
+                        // border to a brighter neutral; the accent stays on the cursor, where it
+                        // signals "you are typing" rather than "something is wrong".
+                        focusedBorderColor = MaterialTheme.colorScheme.outline,
                         unfocusedBorderColor = CharcoalSurface,
                         focusedContainerColor = CharcoalSurface,
                         unfocusedContainerColor = CharcoalSurface,
@@ -308,13 +324,30 @@ private fun ExploreHeader(
                     singleLine = true
                 )
 
-                IconButton(onClick = onCollapse) {
-                    Text(
-                        text = "Cancel",
-                        style = MaterialTheme.typography.labelLarge,
-                        color = ChampagneGold
-                    )
-                }
+                // A plain clickable Text, not an IconButton.
+                //
+                // IconButton always reserves Material's 48dp *minimum interactive size* as real
+                // layout width, regardless of the content it wraps, and it clamps its child to
+                // that square. "Cancel" is wider than 48dp, so it was measured against a box it
+                // could not fit in and rendered clipped — first as "Canc el", then, once the
+                // content was allowed to wrap, still cut off at the screen edge. The row also
+                // gives the field `weight(1f)`, so the button's reserved 48dp came straight out
+                // of the field's budget and pushed the placeholder onto two lines.
+                //
+                // Sizing to the text and keeping a 48dp-tall touch target is what the label
+                // actually needs; the full width of "Cancel" is comfortably tappable on its own.
+                Text(
+                    text = "Cancel",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = ChampagneGold,
+                    maxLines = 1,
+                    softWrap = false,
+                    modifier = Modifier
+                        .clickable(onClick = onCollapse)
+                        .heightIn(min = 48.dp)
+                        .padding(start = 12.dp)
+                        .wrapContentHeight(Alignment.CenterVertically)
+                )
             }
 
             AnimatedVisibility(

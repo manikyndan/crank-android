@@ -514,20 +514,32 @@ private fun RecommendedCard(
                     modifier = Modifier.fillMaxSize()
                 )
 
+                // The touch target and the painted circle are deliberately separated.
+                //
+                // They used to be the same node: `IconButton(...).size(24.dp).background(...)`.
+                // IconButton enforces Material's 48dp minimum interactive size, so the modifier
+                // did not shrink the button — it only shrank the layout slot — and the background
+                // was painted across the full 48dp target. On screen that produced a ~33dp black
+                // disc bleeding over the artwork's top-right corner instead of the intended 24dp
+                // dot. Keeping the 48dp target for accessibility and painting a fixed-size circle
+                // inside it is what makes the drawn size match the intended size.
                 IconButton(
                     onClick = onDismiss,
-                    modifier = Modifier
-                        .align(Alignment.TopEnd)
-                        .padding(4.dp)
-                        .size(24.dp)
-                        .background(Color.Black.copy(alpha = 0.5f), CircleShape)
+                    modifier = Modifier.align(Alignment.TopEnd)
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.Close,
-                        contentDescription = "Dismiss",
-                        tint = Color.White,
-                        modifier = Modifier.size(14.dp)
-                    )
+                    Box(
+                        modifier = Modifier
+                            .size(26.dp)
+                            .background(Color.Black.copy(alpha = 0.45f), CircleShape),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = "Dismiss",
+                            tint = Color.White,
+                            modifier = Modifier.size(14.dp)
+                        )
+                    }
                 }
 
                 Surface(
