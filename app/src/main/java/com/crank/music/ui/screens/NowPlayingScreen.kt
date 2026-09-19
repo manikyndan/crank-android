@@ -11,9 +11,9 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -67,42 +67,25 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.em
-import androidx.compose.ui.unit.sp
 import androidx.media3.common.Player
 import coil3.compose.AsyncImage
 import com.crank.music.ui.components.PlaybackControlsSheet
 import com.crank.music.ui.components.SleepTimerSheet
 import com.crank.music.domain.model.DownloadState
-import com.crank.music.ui.theme.CrankGold
-import com.crank.music.ui.theme.CrankGoldBright
-import com.crank.music.ui.theme.DeepSpaceNavy
 import com.crank.music.ui.theme.HeartRed
-import com.crank.music.ui.theme.MetallicGoldStart
-import com.crank.music.ui.theme.NavyBlue
-import com.crank.music.ui.theme.TextPrimary
-import com.crank.music.ui.theme.TextSecondarySoft
-import com.crank.music.ui.theme.WaveformActive
-import com.crank.music.ui.theme.WaveformInactive
 import com.crank.music.ui.viewmodel.PlayerViewModel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -128,12 +111,7 @@ fun NowPlayingScreen(
     var isLiked by remember { mutableStateOf(false) }
     var isDragging by remember { mutableStateOf(false) }
 
-    val pointerOffsetX = remember { Animatable(0f) }
-    val pointerOffsetY = remember { Animatable(0f) }
-
-    val scope = rememberCoroutineScope()
     val view = LocalView.current
-    val density = LocalDensity.current
 
     val albumArtScale = remember { Animatable(1f) }
     LaunchedEffect(playerState.isPlaying) {
@@ -155,20 +133,9 @@ fun NowPlayingScreen(
         (playerState.progress.toFloat() / playerState.duration.toFloat()).coerceIn(0f, 1f)
     } else 0f
 
-    val waveformAmplitudes = remember { mutableStateListOf<Float>() }
-    LaunchedEffect(Unit) {
-        while (true) {
-            if (waveformAmplitudes.size > 60) waveformAmplitudes.removeAt(0)
-            waveformAmplitudes.add(
-                if (playerState.isPlaying) (0.2f + Math.random().toFloat() * 0.8f) else 0.15f
-            )
-            delay(80)
-        }
-    }
-
-    // Pure Black background
-    Box(modifier = Modifier.fillMaxSize().background(DeepSpaceNavy)) {
-        // Blurred album art backdrop with navy overlay
+    // Blurred artwork backdrop. Tinting it with the theme background instead of a fixed
+    // colour is what lets this screen survive the switch to light mode.
+    Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         if (song?.artworkUrl.orEmpty().isNotBlank()) {
             AsyncImage(
                 model = song?.artworkUrl,
@@ -177,7 +144,7 @@ fun NowPlayingScreen(
                 modifier = Modifier
                     .fillMaxSize()
                     .blur(80.dp)
-                    .graphicsLayer { alpha = 0.3f }
+                    .graphicsLayer { alpha = 0.35f }
             )
             Box(
                 modifier = Modifier
@@ -185,9 +152,9 @@ fun NowPlayingScreen(
                     .background(
                         Brush.verticalGradient(
                             colors = listOf(
-                                DeepSpaceNavy.copy(alpha = 0.5f),
-                                DeepSpaceNavy.copy(alpha = 0.9f),
-                                DeepSpaceNavy
+                                MaterialTheme.colorScheme.background.copy(alpha = 0.55f),
+                                MaterialTheme.colorScheme.background.copy(alpha = 0.92f),
+                                MaterialTheme.colorScheme.background
                             )
                         )
                     )
@@ -210,22 +177,15 @@ fun NowPlayingScreen(
                     Icon(
                         imageVector = Icons.Default.KeyboardArrowDown,
                         contentDescription = "Collapse",
-                        tint = TextPrimary,
-                        modifier = Modifier.size(32.dp)
+                        tint = MaterialTheme.colorScheme.onBackground,
+                        modifier = Modifier.size(30.dp)
                     )
                 }
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Text(
                         text = "Now Playing",
                         style = MaterialTheme.typography.labelMedium,
-                        color = TextSecondarySoft
-                    )
-                    Box(
-                        modifier = Modifier
-                            .width(40.dp)
-                            .height(3.dp)
-                            .clip(RoundedCornerShape(2.dp))
-                            .background(CrankGold)
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
                 Row {
@@ -233,7 +193,11 @@ fun NowPlayingScreen(
                         Icon(
                             imageVector = Icons.Default.Bedtime,
                             contentDescription = "Sleep Timer",
-                            tint = if (playerState.sleepTimerMinutes > 0) CrankGold else TextSecondarySoft,
+                            tint = if (playerState.sleepTimerMinutes > 0) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            },
                             modifier = Modifier.size(22.dp)
                         )
                     }
@@ -241,7 +205,11 @@ fun NowPlayingScreen(
                         Icon(
                             imageVector = Icons.Default.Speed,
                             contentDescription = "Speed",
-                            tint = if (playerState.playbackSpeed != 1.0f) CrankGold else TextSecondarySoft,
+                            tint = if (playerState.playbackSpeed != 1.0f) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            },
                             modifier = Modifier.size(22.dp)
                         )
                     }
@@ -250,41 +218,27 @@ fun NowPlayingScreen(
 
             Spacer(modifier = Modifier.height(4.dp))
 
-            // Album Art with Navy Ambient Glow
+            // Artwork. Straight-on, large, and softly breathing while playing. The previous
+            // version tilted it in 3D under the finger and stamped a LOSSLESS badge on the
+            // corner: the tilt fought the drag-to-seek gesture below, and the badge claimed a
+            // codec guarantee the stream layer never makes.
             Box(
                 modifier = Modifier
-                    .size(300.dp)
+                    .fillMaxWidth()
+                    .weight(1f, fill = false)
+                    .aspectRatio(1f)
                     .graphicsLayer {
-                        val rotX = (pointerOffsetY.value / 3f).coerceIn(-12f, 12f)
-                        val rotY = (pointerOffsetX.value / 3f).coerceIn(-12f, 12f)
-                        rotationX = rotX
-                        rotationY = rotY
-                        cameraDistance = 1200f * density.density
-                        val scale = albumArtScale.value
-                        scaleX = scale
-                        scaleY = scale
-                    }
-                    .pointerInput(Unit) {
-                        detectDragGestures { change, dragAmount ->
-                            change.consume()
-                            scope.launch {
-                                pointerOffsetX.snapTo(
-                                    (pointerOffsetX.value + dragAmount.x) * 0.9f
-                                )
-                                pointerOffsetY.snapTo(
-                                    (pointerOffsetY.value + dragAmount.y) * 0.9f
-                                )
-                            }
-                        }
+                        scaleX = albumArtScale.value
+                        scaleY = albumArtScale.value
                     }
                     .shadow(
-                        elevation = 24.dp,
-                        shape = RoundedCornerShape(20.dp),
-                        spotColor = NavyBlue.copy(alpha = 0.5f),
-                        ambientColor = CrankGold.copy(alpha = 0.15f)
+                        elevation = 28.dp,
+                        shape = RoundedCornerShape(12.dp),
+                        spotColor = Color.Black.copy(alpha = 0.45f),
+                        ambientColor = Color.Black.copy(alpha = 0.2f)
                     )
-                    .clip(RoundedCornerShape(20.dp))
-                    .background(NavyBlue),
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(MaterialTheme.colorScheme.surfaceVariant),
                 contentAlignment = Alignment.Center
             ) {
                 if (song?.artworkUrl.orEmpty().isNotBlank()) {
@@ -298,91 +252,56 @@ fun NowPlayingScreen(
                     Icon(
                         imageVector = Icons.Default.MusicNote,
                         contentDescription = null,
-                        tint = CrankGold,
-                        modifier = Modifier.size(80.dp)
-                    )
-                }
-
-                // LOSSLESS badge
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.TopEnd)
-                        .padding(12.dp)
-                        .background(
-                            Brush.horizontalGradient(
-                                colors = listOf(
-                                    MetallicGoldStart.copy(alpha = 0.9f),
-                                    CrankGold.copy(alpha = 0.9f)
-                                )
-                            ),
-                            RoundedCornerShape(6.dp)
-                        )
-                        .padding(horizontal = 10.dp, vertical = 4.dp)
-                ) {
-                    Text(
-                        text = "LOSSLESS",
-                        style = MaterialTheme.typography.labelSmall.copy(
-                            fontWeight = FontWeight.Bold,
-                            letterSpacing = 0.1.em,
-                            color = DeepSpaceNavy
-                        )
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(72.dp)
                     )
                 }
             }
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            // Song Title (White Serif) + Artist (Gold Sans-Serif)
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                modifier = Modifier.fillMaxWidth()
+            // Title left-aligned and bold, artist underneath in a muted tone. The accent is
+            // spent on controls, not on the artist name.
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.Center,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
+                Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = song?.title ?: "No Song Selected",
-                        style = MaterialTheme.typography.headlineSmall,
-                        color = TextPrimary,
-                        textAlign = TextAlign.Center,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f, fill = false)
+                        style = MaterialTheme.typography.titleLarge,
+                        color = MaterialTheme.colorScheme.onBackground,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
                     )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    LikeButton(
-                        isLiked = isLiked,
-                        onClick = {
-                            isLiked = !isLiked
-                            view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
-                        }
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = song?.artistName ?: "Unknown Artist",
+                        style = MaterialTheme.typography.titleSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = song?.artistName ?: "Unknown Artist",
-                    style = MaterialTheme.typography.titleMedium.copy(
-                        fontWeight = FontWeight.Medium,
-                        color = MetallicGoldStart
-                    ),
-                    textAlign = TextAlign.Center,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
+                LikeButton(
+                    isLiked = isLiked,
+                    onClick = {
+                        isLiked = !isLiked
+                        view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+                    }
                 )
             }
 
             Spacer(modifier = Modifier.height(12.dp))
 
-            // Waveform progress with gold active bars
-            WaveformProgressBar(
+            Scrubber(
                 progress = progressFloat,
-                amplitudes = waveformAmplitudes.toList(),
                 onSeek = { percent ->
                     val newPos = (percent * playerState.duration).toLong()
                     playerViewModel.seekTo(newPos)
                 },
+                onDragStart = { isDragging = true },
+                onDragEnd = { isDragging = false },
                 modifier = Modifier.fillMaxWidth()
             )
 
@@ -393,28 +312,31 @@ fun NowPlayingScreen(
                 Text(
                     text = formatMs(playerState.progress),
                     style = MaterialTheme.typography.labelMedium,
-                    color = TextSecondarySoft
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Text(
-                    text = formatMs(playerState.duration),
+                    // Counting down is how every streaming player shows the tail of a track,
+                    // and it makes the number change as fast as the elapsed one.
+                    text = "-" + formatMs((playerState.duration - playerState.progress).coerceAtLeast(0L)),
                     style = MaterialTheme.typography.labelMedium,
-                    color = TextSecondarySoft
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            // Playback Controls — Large metallic gold
+            // Transport controls. Secondary controls stay muted; the accent is reserved for
+            // the play button and for the toggles when they are on.
             Row(
-                modifier = Modifier.fillMaxWidth(0.85f),
+                modifier = Modifier.fillMaxWidth(0.9f),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 AnimatedToggleButton(
                     isActive = playerState.shuffleModeEnabled,
                     onClick = { playerViewModel.toggleShuffle() },
-                    activeColor = CrankGold,
-                    inactiveColor = TextSecondarySoft
+                    activeColor = MaterialTheme.colorScheme.primary,
+                    inactiveColor = MaterialTheme.colorScheme.onSurfaceVariant
                 ) { isActive, color ->
                     Icon(
                         imageVector = Icons.Default.Shuffle,
@@ -431,12 +353,11 @@ fun NowPlayingScreen(
                     Icon(
                         imageVector = Icons.Default.SkipPrevious,
                         contentDescription = "Previous",
-                        tint = CrankGold,
-                        modifier = Modifier.size(36.dp)
+                        tint = MaterialTheme.colorScheme.onBackground,
+                        modifier = Modifier.size(34.dp)
                     )
                 }
 
-                // 3D Embossed Metallic Gold Play/Pause
                 MorphingPlayPauseButton(
                     isPlaying = playerState.isPlaying,
                     onClick = { playerViewModel.togglePlayPause() }
@@ -449,16 +370,16 @@ fun NowPlayingScreen(
                     Icon(
                         imageVector = Icons.Default.SkipNext,
                         contentDescription = "Next",
-                        tint = CrankGold,
-                        modifier = Modifier.size(36.dp)
+                        tint = MaterialTheme.colorScheme.onBackground,
+                        modifier = Modifier.size(34.dp)
                     )
                 }
 
                 AnimatedToggleButton(
                     isActive = playerState.repeatMode != Player.REPEAT_MODE_OFF,
                     onClick = { playerViewModel.toggleRepeatMode() },
-                    activeColor = CrankGold,
-                    inactiveColor = TextSecondarySoft
+                    activeColor = MaterialTheme.colorScheme.primary,
+                    inactiveColor = MaterialTheme.colorScheme.onSurfaceVariant
                 ) { isActive, color ->
                     Icon(
                         imageVector = if (playerState.repeatMode == Player.REPEAT_MODE_ONE)
@@ -470,7 +391,7 @@ fun NowPlayingScreen(
                 }
             }
 
-            // Bottom action icons (gold)
+            // Secondary actions, muted so they don't compete with the transport row.
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -482,7 +403,7 @@ fun NowPlayingScreen(
                     Icon(
                         imageVector = Icons.Default.GraphicEq,
                         contentDescription = "Equalizer",
-                        tint = CrankGold,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.size(24.dp)
                     )
                 }
@@ -490,7 +411,7 @@ fun NowPlayingScreen(
                     Icon(
                         imageVector = Icons.AutoMirrored.Filled.QueueMusic,
                         contentDescription = "Queue",
-                        tint = CrankGold,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.size(24.dp)
                     )
                 }
@@ -498,7 +419,7 @@ fun NowPlayingScreen(
                     Icon(
                         imageVector = Icons.Default.FormatQuote,
                         contentDescription = "Lyrics",
-                        tint = CrankGold,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.size(24.dp)
                     )
                 }
@@ -512,9 +433,10 @@ fun NowPlayingScreen(
                         },
                         contentDescription = "Download",
                         tint = when (downloadState) {
-                            DownloadState.COMPLETED -> CrankGold
-                            DownloadState.DOWNLOADING -> CrankGold.copy(alpha = 0.7f)
-                            else -> CrankGold
+                            DownloadState.COMPLETED -> MaterialTheme.colorScheme.primary
+                            DownloadState.DOWNLOADING ->
+                                MaterialTheme.colorScheme.primary.copy(alpha = 0.7f)
+                            else -> MaterialTheme.colorScheme.onSurfaceVariant
                         },
                         modifier = Modifier.size(24.dp)
                     )
@@ -523,7 +445,7 @@ fun NowPlayingScreen(
                     Icon(
                         imageVector = Icons.Default.AutoAwesome,
                         contentDescription = "Crank AI",
-                        tint = CrankGold,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.size(24.dp)
                     )
                 }
@@ -571,51 +493,33 @@ private fun MorphingPlayPauseButton(
         label = "scale"
     )
 
-    // 3D Embossed Metallic Gold Play/Pause Button
+    // A flat accent disc. The old button layered a radial gold gradient, an embossed ring
+    // and two shadows on top of each other; at 72dp that reads as noise, and the gradient
+    // clashed with the flat surfaces everywhere else in the app.
     Box(
         modifier = modifier
-            .size(72.dp)
+            .size(76.dp)
             .graphicsLayer { scaleX = scale; scaleY = scale }
-            .shadow(
-                elevation = 12.dp,
-                shape = CircleShape,
-                spotColor = CrankGold.copy(alpha = 0.4f),
-                ambientColor = NavyBlue.copy(alpha = 0.3f)
-            )
             .clip(CircleShape)
             .background(
-                Brush.radialGradient(
-                    colors = listOf(
-                        CrankGoldBright,
-                        CrankGold,
-                        MetallicGoldStart
-                    )
-                )
-            )
-            .drawBehind {
-                // Embossed ring effect
-                val stroke = 3.dp.toPx()
-                val radius = (size.minDimension - stroke) / 2
-                drawCircle(
-                    color = Color.White.copy(alpha = 0.2f * animatedProgress),
-                    radius = radius,
-                    style = Stroke(stroke)
-                )
-                // Inner shadow
-                drawCircle(
-                    color = DeepSpaceNavy.copy(alpha = 0.15f * (1f - animatedProgress)),
-                    radius = radius - stroke * 2,
-                    style = Stroke(stroke * 0.5f)
-                )
-            },
+                if (isPlaying) {
+                    MaterialTheme.colorScheme.primary
+                } else {
+                    MaterialTheme.colorScheme.onBackground
+                }
+            ),
         contentAlignment = Alignment.Center
     ) {
         IconButton(onClick = onClick) {
             Icon(
                 imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
                 contentDescription = if (isPlaying) "Pause" else "Play",
-                tint = DeepSpaceNavy,
-                modifier = Modifier.size(38.dp)
+                tint = if (isPlaying) {
+                    MaterialTheme.colorScheme.onPrimary
+                } else {
+                    MaterialTheme.colorScheme.background
+                },
+                modifier = Modifier.size(40.dp)
             )
         }
     }
@@ -686,7 +590,7 @@ private fun LikeButton(
             Icon(
                 imageVector = if (isLiked) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
                 contentDescription = "Like",
-                tint = if (isLiked) HeartRed else TextSecondarySoft,
+                tint = if (isLiked) HeartRed else MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier
                     .size(22.dp)
                     .graphicsLayer {
@@ -748,75 +652,86 @@ private fun AnimatedToggleButton(
 }
 
 @Composable
-private fun WaveformProgressBar(
+private fun Scrubber(
     progress: Float,
-    amplitudes: List<Float>,
     onSeek: (Float) -> Unit,
+    onDragStart: () -> Unit,
+    onDragEnd: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     var isDragging by remember { mutableStateOf(false) }
     var dragProgress by remember { mutableFloatStateOf(progress) }
     val displayProgress = if (isDragging) dragProgress else progress
 
-    Canvas(
-        modifier = modifier
-            .height(48.dp)
-            .pointerInput(Unit) {
-                detectHorizontalDragGestures(
-                    onDragStart = { offset ->
-                        isDragging = true
-                        dragProgress = (offset.x / size.width).coerceIn(0f, 1f)
-                    },
-                    onDragEnd = {
-                        isDragging = false
-                        onSeek(dragProgress)
-                    },
-                    onDragCancel = {
-                        isDragging = false
-                    },
-                    onHorizontalDrag = { _, dragAmount ->
-                        dragProgress = (dragProgress + dragAmount / size.width).coerceIn(0f, 1f)
-                    }
+    // Read the colours outside the Canvas: its draw lambda is not a @Composable scope.
+    val trackColor = MaterialTheme.colorScheme.surfaceVariant
+    val playedColor = MaterialTheme.colorScheme.onBackground
+
+    // The previous control drew a bar per 80ms tick from a list of Math.random() amplitudes,
+    // so the bar heights had no relationship to the audio. This scrubs the real position.
+    Column(modifier = modifier) {
+        Canvas(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(32.dp)
+                .pointerInput(Unit) {
+                    detectHorizontalDragGestures(
+                        onDragStart = { offset ->
+                            isDragging = true
+                            onDragStart()
+                            dragProgress = (offset.x / size.width).coerceIn(0f, 1f)
+                        },
+                        onDragEnd = {
+                            isDragging = false
+                            onDragEnd()
+                            onSeek(dragProgress)
+                        },
+                        onDragCancel = {
+                            isDragging = false
+                            onDragEnd()
+                        },
+                        onHorizontalDrag = { _, dragAmount ->
+                            dragProgress = (dragProgress + dragAmount / size.width).coerceIn(0f, 1f)
+                        }
+                    )
+                }
+        ) {
+            val trackHeight = if (isDragging) 8.dp.toPx() else 6.dp.toPx()
+            val centerY = size.height / 2
+            val radius = CornerRadius(trackHeight / 2)
+
+            // Unplayed portion
+            drawRoundRect(
+                color = trackColor,
+                topLeft = Offset(0f, centerY - trackHeight / 2),
+                size = Size(size.width, trackHeight),
+                cornerRadius = radius
+            )
+
+            // Played portion
+            if (displayProgress > 0f) {
+                drawRoundRect(
+                    color = playedColor,
+                    topLeft = Offset(0f, centerY - trackHeight / 2),
+                    size = Size(size.width * displayProgress, trackHeight),
+                    cornerRadius = radius
                 )
             }
-    ) {
-        val barWidth = 3.dp.toPx()
-        val barGap = 2.dp.toPx()
-        val totalBarWidth = barWidth + barGap
-        val numBars = (size.width / totalBarWidth).toInt().coerceAtLeast(1)
-        val centerY = size.height / 2
 
-        for (i in 0 until numBars) {
-            val x = i * totalBarWidth
-            val normalizedIndex = i.toFloat() / numBars
-            val isPlayed = normalizedIndex <= displayProgress
-
-            val amplitude = if (i < amplitudes.size) amplitudes[i] else 0.3f
-            val barHeight = amplitude * size.height * 0.85f
-
-            val color = if (isPlayed) WaveformActive else WaveformInactive
-            val alpha = if (isPlayed) 1f else 0.6f
-
-            drawRoundRect(
-                color = color.copy(alpha = alpha),
-                topLeft = Offset(x, centerY - barHeight / 2),
-                size = Size(barWidth, barHeight),
-                cornerRadius = CornerRadius(barWidth / 2)
-            )
-        }
-
-        if (isDragging) {
-            val handleX = displayProgress * size.width
-            drawCircle(
-                color = CrankGold,
-                radius = 6.dp.toPx(),
-                center = Offset(handleX, centerY)
-            )
-            drawCircle(
-                color = Color.White.copy(alpha = 0.3f),
-                radius = 10.dp.toPx(),
-                center = Offset(handleX, centerY)
-            )
+            // Handle, visible only while the user is actually scrubbing
+            if (isDragging) {
+                val handleX = (displayProgress * size.width).coerceIn(0f, size.width)
+                drawCircle(
+                    color = Color.White,
+                    radius = 7.dp.toPx(),
+                    center = Offset(handleX, centerY)
+                )
+                drawCircle(
+                    color = playedColor,
+                    radius = 3.dp.toPx(),
+                    center = Offset(handleX, centerY)
+                )
+            }
         }
     }
 }
