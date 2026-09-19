@@ -107,17 +107,15 @@ fun MainScreen(
                         navController.navigate("playlist_detail/$collectionSlug")
                     },
                     onProfileClick = {
-                        navController.navigate(NavItem.You.route) {
-                            popUpTo(navController.graph.startDestinationId) {
-                                saveState = true
-                            }
-                            launchSingleTop = true
-                            restoreState = true
-                        }
+                        // The You tab is gone, so the Home header's profile affordance is now the
+                        // only thing that opens Settings — and Settings is the only route to the
+                        // equalizer, appearance, privacy, downloads and Music DNA. Pointed at the
+                        // settings route directly rather than at a removed tab.
+                        navController.navigate("settings")
                     }
                 )
             }
-            composable(NavItem.Explore.route) {
+            composable(NavItem.Browse.route) {
                 ExploreScreen(
                     onSongSelect = { selectedSong ->
                         playerViewModel.playSong(selectedSong)
@@ -166,16 +164,6 @@ fun MainScreen(
                     },
                     onAlbumClick = { album ->
                         navController.navigate(albumRoute(album))
-                    }
-                )
-            }
-            composable(NavItem.Create.route) {
-                CrankAIScreen(
-                    onSongSelect = { selectedSong ->
-                        playerViewModel.playSong(selectedSong)
-                    },
-                    onBackClick = {
-                        navController.popBackStack()
                     }
                 )
             }
@@ -248,11 +236,9 @@ fun MainScreen(
                         navController.navigate(albumRoute(album))
                     },
                     onBrowseClick = {
-                        // There is no Search tab in the bottom bar; Explore is where the
-                        // search field lives. Sending an empty library to Explore is the
-                        // closest real destination, so the "Find Music" button takes you
-                        // somewhere that can actually help.
-                        navController.navigate(NavItem.Explore.route) {
+                        // Search is a real top-level tab now, so an empty library can send the
+                        // user straight to the search field instead of to Browse as a stand-in.
+                        navController.navigate(NavItem.Search.route) {
                             popUpTo(NavItem.Home.route)
                         }
                     }
@@ -313,22 +299,10 @@ fun MainScreen(
                     }
                 )
             }
-            composable(NavItem.You.route) {
-                ProfileScreen(
-                    onSettingsClick = {
-                        navController.navigate("settings")
-                    },
-                    onDownloadsClick = {
-                        navController.navigate("downloads")
-                    },
-                    onStatsClick = {
-                        navController.navigate("music_dna")
-                    },
-                    onRecognizeClick = {
-                        navController.navigate("recognition")
-                    }
-                )
-            }
+            // The You destination is removed with its tab. The routes it linked to — settings,
+            // downloads, music_dna, recognition — are all still declared below and still
+            // reachable; what is gone is the hub that pointed at them. See the NavItem note for
+            // why this was deliberate and how to undo it.
             composable("recognition") {
                 RecognitionScreen(
                     onPlaySong = { recognized ->
