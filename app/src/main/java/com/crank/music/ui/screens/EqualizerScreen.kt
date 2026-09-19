@@ -451,6 +451,9 @@ private fun SpectrumAnalyzer(
         }
     }
 
+    val hoistedChampagneGold = ChampagneGold
+    val hoistedGoldMuted = GoldMuted
+
     Canvas(modifier = modifier) {
         val barWidth = 8.dp.toPx()
         val gap = 4.dp.toPx()
@@ -475,9 +478,9 @@ private fun SpectrumAnalyzer(
             if (isEnabled && barHeight > 0) {
                 val gradient = Brush.verticalGradient(
                     colors = listOf(
-                        ChampagneGold,
-                        GoldMuted,
-                        ChampagneGold.copy(alpha = 0.3f)
+                        hoistedChampagneGold,
+                        hoistedGoldMuted,
+                        hoistedChampagneGold.copy(alpha = 0.3f)
                     ),
                     startY = y,
                     endY = size.height

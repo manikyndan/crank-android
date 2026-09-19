@@ -1,5 +1,7 @@
 package com.crank.music.ui.theme
 
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.ui.graphics.Color
 
 // ═══════════════════════════════════════════════════════════════
@@ -22,67 +24,63 @@ import androidx.compose.ui.graphics.Color
 //    music player that should carry colour, so the greys here are
 //    balanced and the accent is reserved for interactive state.
 //
-// Light-mode equivalents live in [LightColorScheme] in Theme.kt.
-// These top-level values are the dark-mode ones.
+// 3. **Every token resolves per-theme.** They are `val`s with @Composable getters backed by
+//    [LocalCrankPalette], so a screen that names `ChampagneGold` or `ObsidianBlack` follows
+//    light/dark automatically. Light values live in [LightPalette] in Theme.kt.
 // ═══════════════════════════════════════════════════════════════
 
-// ─── Accent: single warm ramp ───
-val CrankGold = Color(0xFFFA2D48)
-val CrankGoldBright = Color(0xFFFF3752)
-val MetallicGoldStart = Color(0xFFE6223C)
-val MetallicGoldEnd = Color(0xFFFA2D48)
-val AmberGlow = Color(0xFFFF6480)
-val BronzeDark = Color(0xFFC9182F)
-val BronzeShadow = Color(0xFF7A0F1E)
+private val pal: CrankPalette
+    @Composable
+    @ReadOnlyComposable
+    get() = LocalCrankPalette.current
 
-// ─── Backgrounds: true black → neutral greys ───
-val DeepSpaceNavy = Color(0xFF000000)
-val MidnightBlue = Color(0xFF121212)
-val DarkerNavy = Color(0xFF1C1C1E)
-val NavyBlue = Color(0xFF2C2C2E)
-
-// ─── Card Gradient: elevated grey → black ───
-val CardGradientTop = Color(0xFF1C1C1E)
-val CardGradientBottom = Color(0xFF000000)
+// ─── Surfaces ───
+val ObsidianBlack: Color @Composable @ReadOnlyComposable get() = pal.background
+val DeepSpaceNavy: Color @Composable @ReadOnlyComposable get() = pal.background
+val MidnightBlue: Color @Composable @ReadOnlyComposable get() = pal.surface
+val CharcoalSurface: Color @Composable @ReadOnlyComposable get() = pal.surface
+val CharcoalElevated: Color @Composable @ReadOnlyComposable get() = pal.surfaceElevated
+val DarkerNavy: Color @Composable @ReadOnlyComposable get() = pal.surfaceElevated
+val NavyBlue: Color @Composable @ReadOnlyComposable get() = pal.navyBlue
+val DarkGray: Color @Composable @ReadOnlyComposable get() = pal.surface
 
 // ─── Text ───
-val TextPrimary = Color(0xFFFFFFFF)
-val TextSecondarySoft = Color(0xFFA1A1A6)
-val TextDisabled = Color(0x80FFFFFF)
+val TextPrimary: Color @Composable @ReadOnlyComposable get() = pal.textPrimary
+val WarmWhite: Color @Composable @ReadOnlyComposable get() = pal.textPrimary
+val TextSecondarySoft: Color @Composable @ReadOnlyComposable get() = pal.textSecondary
+val TextSecondary: Color @Composable @ReadOnlyComposable get() = pal.textSecondary
+val TextTertiary: Color @Composable @ReadOnlyComposable get() = pal.textDisabled
+val TextDisabled: Color @Composable @ReadOnlyComposable get() = pal.textDisabled
 
-// ─── Semantic ───
-val ErrorRed = Color(0xFFE5484D)
-val SuccessGreen = Color(0xFF30D158)
+// ─── Accent ───
+val CrankGold: Color @Composable @ReadOnlyComposable get() = pal.accent
+val ChampagneGold: Color @Composable @ReadOnlyComposable get() = pal.accent
+val GoldMetallic: Color @Composable @ReadOnlyComposable get() = pal.accent
+val WaveformActive: Color @Composable @ReadOnlyComposable get() = pal.accent
+val MetallicGoldStart: Color @Composable @ReadOnlyComposable get() = pal.accent
+val MetallicGoldEnd: Color @Composable @ReadOnlyComposable get() = pal.accent
+val GoldGradientMid: Color @Composable @ReadOnlyComposable get() = pal.accent
+val CrankGoldBright: Color @Composable @ReadOnlyComposable get() = pal.accentBright
+val GoldGradientEnd: Color @Composable @ReadOnlyComposable get() = pal.accentBright
+val GoldGradientStart: Color @Composable @ReadOnlyComposable get() = pal.accent
+val AmberGlow: Color @Composable @ReadOnlyComposable get() = pal.accentBright
+val GoldDark: Color @Composable @ReadOnlyComposable get() = pal.accent
+val GoldMuted: Color @Composable @ReadOnlyComposable get() = pal.accent
+val BronzeDark: Color @Composable @ReadOnlyComposable get() = pal.accent
+val BronzeShadow: Color @Composable @ReadOnlyComposable get() = pal.accent
 
-// ─── UI ───
-val OverlayBlack = Color(0x80000000)
-val GlassSurface = Color(0x1FFFFFFF)
-val GlassBorder = Color(0x1FFFFFFF)
-val Divider = Color(0x14FFFFFF)
+// ─── Structure ───
+val Divider: Color @Composable @ReadOnlyComposable get() = pal.divider
+val OverlayBlack: Color @Composable @ReadOnlyComposable get() = pal.overlay
+val GlassSurface: Color @Composable @ReadOnlyComposable get() = pal.glassSurface
+val GlassBorder: Color @Composable @ReadOnlyComposable get() = pal.glassBorder
+val CardBorderGold: Color @Composable @ReadOnlyComposable get() = pal.cardBorder
+val NavyShadow: Color @Composable @ReadOnlyComposable get() = pal.shadow
+val CardGradientTop: Color @Composable @ReadOnlyComposable get() = pal.cardGradientTop
+val CardGradientBottom: Color @Composable @ReadOnlyComposable get() = pal.cardGradientBottom
+val WaveformInactive: Color @Composable @ReadOnlyComposable get() = pal.navyBlue
 
-// ─── Accent ramp (kept as a ramp for gradients) ───
-val GoldGradientStart = Color(0xFFE6223C)
-val GoldGradientMid = Color(0xFFFA2D48)
-val GoldGradientEnd = Color(0xFFFF6480)
-
-// ─── Card Border (light hairline, not a coloured ring) ───
-val CardBorderGold = Color(0x1FFFFFFF)
-
-// ─── Shadow for Cards ───
-val NavyShadow = Color(0x66000000)
-
-// ─── Legacy Aliases (used by existing screens) ───
-val ObsidianBlack = DeepSpaceNavy
-val DarkGray = MidnightBlue
-val CharcoalSurface = MidnightBlue
-val CharcoalElevated = DarkerNavy
-val ChampagneGold = CrankGold
-val GoldMuted = BronzeDark
-val GoldDark = BronzeDark
-val GoldMetallic = CrankGold
-val WarmWhite = TextPrimary
-val TextSecondary = TextSecondarySoft
-val TextTertiary = TextDisabled
-val HeartRed = ErrorRed
-val WaveformActive = CrankGold
-val WaveformInactive = NavyBlue
+// ─── Semantic status colours ───
+val ErrorRed: Color @Composable @ReadOnlyComposable get() = pal.error
+val SuccessGreen: Color @Composable @ReadOnlyComposable get() = pal.success
+val HeartRed: Color @Composable @ReadOnlyComposable get() = pal.heart

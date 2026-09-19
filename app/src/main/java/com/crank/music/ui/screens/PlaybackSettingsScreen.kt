@@ -325,6 +325,9 @@ private fun CrossfadeSection(
                                 .background(CharcoalElevated),
                             contentAlignment = Alignment.Center
                         ) {
+                            val hoistedChampagneGold = ChampagneGold
+                            val hoistedGoldDark = GoldDark
+
                             Canvas(modifier = Modifier.fillMaxSize()) {
                                 val waveHeight = 20f
                                 val baseY = size.height / 2
@@ -336,7 +339,7 @@ private fun CrossfadeSection(
 
                                     if (alpha1 > 0f) {
                                         drawLine(
-                                            color = ChampagneGold.copy(alpha = alpha1 * 0.8f),
+                                            color = hoistedChampagneGold.copy(alpha = alpha1 * 0.8f),
                                             start = Offset(x, baseY - waveHeight * alpha1),
                                             end = Offset(x, baseY + waveHeight * alpha1),
                                             strokeWidth = 3.dp.toPx(),
@@ -345,7 +348,7 @@ private fun CrossfadeSection(
                                     }
                                     if (alpha2 > 0f) {
                                         drawLine(
-                                            color = GoldDark.copy(alpha = alpha2 * 0.8f),
+                                            color = hoistedGoldDark.copy(alpha = alpha2 * 0.8f),
                                             start = Offset(x, baseY - waveHeight * alpha2 * 0.7f),
                                             end = Offset(x, baseY + waveHeight * alpha2 * 0.7f),
                                             strokeWidth = 2.dp.toPx(),
@@ -466,16 +469,19 @@ private fun GaplessSection(
                     shape = CircleShape
                 ) {
                     Box(contentAlignment = Alignment.Center) {
+                        val hoistedChampagneGold = ChampagneGold
+                        val hoistedTextSecondary = TextSecondary
+
                         Canvas(modifier = Modifier.size(24.dp)) {
                             drawLine(
-                                color = if (enabled) ChampagneGold else TextSecondary,
+                                color = if (enabled) hoistedChampagneGold else hoistedTextSecondary,
                                 start = Offset(2f, size.height / 2),
                                 end = Offset(size.width - 2f, size.height / 2),
                                 strokeWidth = 2.dp.toPx(),
                                 cap = StrokeCap.Round
                             )
                             drawCircle(
-                                color = if (enabled) ChampagneGold else TextSecondary,
+                                color = if (enabled) hoistedChampagneGold else hoistedTextSecondary,
                                 radius = 2.dp.toPx(),
                                 center = Offset(size.width / 2, size.height / 2)
                             )

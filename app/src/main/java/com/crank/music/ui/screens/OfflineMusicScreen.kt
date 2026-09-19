@@ -311,9 +311,13 @@ private fun StorageIndicator(totalStorage: Long, usedStorage: Long) {
                 modifier = Modifier.size(90.dp),
                 contentAlignment = Alignment.Center
             ) {
+                val hoistedChampagneGold = ChampagneGold
+                val hoistedCharcoalElevated = CharcoalElevated
+                val hoistedGoldDark = GoldDark
+
                 Canvas(modifier = Modifier.size(90.dp)) {
                     drawArc(
-                        color = CharcoalElevated,
+                        color = hoistedCharcoalElevated,
                         startAngle = -90f,
                         sweepAngle = 360f,
                         useCenter = false,
@@ -321,7 +325,7 @@ private fun StorageIndicator(totalStorage: Long, usedStorage: Long) {
                     )
                     drawArc(
                         brush = Brush.sweepGradient(
-                            colors = listOf(ChampagneGold, GoldDark, ChampagneGold)
+                            colors = listOf(hoistedChampagneGold, hoistedGoldDark, hoistedChampagneGold)
                         ),
                         startAngle = -90f,
                         sweepAngle = animatedProgress * 360f,
@@ -567,9 +571,11 @@ private fun SwipeableOfflineItem(
                         tint = ChampagneGold,
                         modifier = Modifier.size(20.dp)
                     )
+                    val hoistedChampagneGold = ChampagneGold
+
                     Canvas(modifier = Modifier.size(44.dp)) {
                         drawArc(
-                            color = ChampagneGold,
+                            color = hoistedChampagneGold,
                             startAngle = -90f,
                             sweepAngle = 360f * item.downloadProgress,
                             useCenter = false,

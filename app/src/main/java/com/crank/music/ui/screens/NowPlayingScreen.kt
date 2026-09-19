@@ -534,6 +534,8 @@ private fun LikeButton(
     val scale = remember { Animatable(1f) }
     val particles = remember { mutableStateListOf<Particle>() }
     val scope = rememberCoroutineScope()
+    // Read before the Canvas: its draw lambda is not a @Composable scope.
+    val heartColor = HeartRed
 
     LaunchedEffect(isLiked) {
         if (isLiked) {
@@ -580,7 +582,7 @@ private fun LikeButton(
                     }
             ) {
                 drawCircle(
-                    color = HeartRed.copy(alpha = particle.alpha),
+                    color = heartColor.copy(alpha = particle.alpha),
                     radius = size.minDimension / 2
                 )
             }
@@ -590,7 +592,7 @@ private fun LikeButton(
             Icon(
                 imageVector = if (isLiked) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
                 contentDescription = "Like",
-                tint = if (isLiked) HeartRed else MaterialTheme.colorScheme.onSurfaceVariant,
+                tint = if (isLiked) heartColor else MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier
                     .size(22.dp)
                     .graphicsLayer {

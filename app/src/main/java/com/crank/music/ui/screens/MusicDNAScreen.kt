@@ -258,6 +258,8 @@ private fun RadarChartSection(
     dimensions: List<RadarDimension>,
     onDimensionClick: (RadarDimension) -> Unit
 ) {
+    // Hoisted out of the Canvas draw lambdas, which are not @Composable scopes.
+    val accentColor = ChampagneGold
     val animationProgress = remember { Animatable(0f) }
 
     LaunchedEffect(Unit) {
@@ -326,14 +328,14 @@ private fun RadarChartSection(
                         path = path,
                         brush = Brush.radialGradient(
                             colors = listOf(
-                                ChampagneGold.copy(alpha = 0.4f),
-                                ChampagneGold.copy(alpha = 0.1f)
+                                accentColor.copy(alpha = 0.4f),
+                                accentColor.copy(alpha = 0.1f)
                             )
                         )
                     )
                     drawPath(
                         path = path,
-                        color = ChampagneGold,
+                        color = accentColor,
                         style = Stroke(2.dp.toPx(), cap = StrokeCap.Round)
                     )
 
@@ -343,7 +345,7 @@ private fun RadarChartSection(
                         val x = centerX + cos(angle.toDouble()).toFloat() * radius
                         val y = centerY + sin(angle.toDouble()).toFloat() * radius
                         drawCircle(
-                            color = ChampagneGold,
+                            color = accentColor,
                             radius = 5.dp.toPx(),
                             center = Offset(x, y)
                         )
@@ -760,6 +762,8 @@ private fun BadgeItem(
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    // Hoisted out of the drawBehind lambda, which is not a @Composable scope.
+    val accentColor = ChampagneGold
     val infiniteTransition = rememberInfiniteTransition(label = "badge_shimmer")
     val shimmerOffset by infiniteTransition.animateFloat(
         initialValue = -1f,
@@ -793,7 +797,7 @@ private fun BadgeItem(
                                 brush = Brush.linearGradient(
                                     colors = listOf(
                                         Color.Transparent,
-                                        ChampagneGold.copy(alpha = 0.08f),
+                                        accentColor.copy(alpha = 0.08f),
                                         Color.Transparent
                                     ),
                                     start = Offset(shimmerX - 50.dp.toPx(), 0f),

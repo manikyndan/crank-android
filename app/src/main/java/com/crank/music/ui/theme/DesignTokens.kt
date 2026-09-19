@@ -3,6 +3,7 @@ package com.crank.music.ui.theme
 import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.Spring
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
@@ -114,6 +115,8 @@ object CrankTokens {
         fontFamily = InterFont,
         fontWeight = FontWeight.Medium,
         fontSize = 14.sp,
-        color = MetallicGoldStart
+        // A TextStyle is constructed once at class-load, so it cannot resolve a theme-aware
+        // token. Call sites that need the live accent pass a colour explicitly.
+        color = Color(0xFFE6223C)
     )
 }

@@ -329,10 +329,12 @@ private fun CheckingView() {
                 .graphicsLayer { rotationZ = rotation },
             contentAlignment = Alignment.Center
         ) {
+            val hoistedChampagneGold = ChampagneGold
+
             Canvas(modifier = Modifier.size(80.dp)) {
                 drawArc(
                     brush = Brush.sweepGradient(
-                        colors = listOf(ChampagneGold, Color.Transparent, ChampagneGold)
+                        colors = listOf(hoistedChampagneGold, Color.Transparent, hoistedChampagneGold)
                     ),
                     startAngle = 0f,
                     sweepAngle = 270f,
@@ -569,9 +571,13 @@ private fun DownloadingView(
             modifier = Modifier.size(180.dp),
             contentAlignment = Alignment.Center
         ) {
+            val hoistedChampagneGold = ChampagneGold
+            val hoistedCharcoalElevated = CharcoalElevated
+            val hoistedGoldDark = GoldDark
+
             Canvas(modifier = Modifier.size(180.dp)) {
                 drawArc(
-                    color = CharcoalElevated,
+                    color = hoistedCharcoalElevated,
                     startAngle = -90f,
                     sweepAngle = 360f,
                     useCenter = false,
@@ -579,7 +585,7 @@ private fun DownloadingView(
                 )
                 drawArc(
                     brush = Brush.sweepGradient(
-                        colors = listOf(GoldDark, ChampagneGold, GoldDark)
+                        colors = listOf(hoistedGoldDark, hoistedChampagneGold, hoistedGoldDark)
                     ),
                     startAngle = -90f,
                     sweepAngle = animatedProgress * 360f,
@@ -834,10 +840,13 @@ private fun InstallingView() {
             modifier = Modifier.size(100.dp),
             contentAlignment = Alignment.Center
         ) {
+            val hoistedChampagneGold = ChampagneGold
+            val hoistedGoldDark = GoldDark
+
             Canvas(modifier = Modifier.size(100.dp)) {
                 drawArc(
                     brush = Brush.sweepGradient(
-                        colors = listOf(ChampagneGold, Color.Transparent, GoldDark, ChampagneGold)
+                        colors = listOf(hoistedChampagneGold, Color.Transparent, hoistedGoldDark, hoistedChampagneGold)
                     ),
                     startAngle = rotation,
                     sweepAngle = 300f,

@@ -68,8 +68,6 @@ import com.crank.music.ui.theme.AmberGlow
 import com.crank.music.ui.theme.CrankGold
 import com.crank.music.ui.theme.CrankGoldBright
 import com.crank.music.ui.theme.DeepSpaceNavy
-import com.crank.music.ui.theme.ErrorRed
-import com.crank.music.ui.theme.SuccessGreen
 import com.crank.music.ui.theme.TextPrimary
 import kotlinx.coroutines.delay
 import kotlin.math.cos
@@ -355,7 +353,9 @@ fun SuccessCheckmark(
     isVisible: Boolean,
     modifier: Modifier = Modifier,
     size: androidx.compose.ui.unit.Dp = 80.dp,
-    color: Color = SuccessGreen
+    // A default argument is evaluated outside the composition, so it cannot read a
+    // theme-aware token. This is the dark-theme success green; callers may override it.
+    color: Color = Color(0xFF30D158)
 ) {
     val progress = remember { Animatable(0f) }
 
@@ -724,12 +724,14 @@ fun RedFlashError(
     }
 
     Box(modifier = modifier) {
+        // Flashed overlay colour, read before the layout lambda.
+        val flashColor = MaterialTheme.colorScheme.error
         content()
         if (flashAlpha > 0f) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(ErrorRed.copy(alpha = flashAlpha))
+                    .background(flashColor.copy(alpha = flashAlpha))
             )
         }
     }

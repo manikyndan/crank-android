@@ -110,6 +110,9 @@ fun CrankAIScreen(
 ) {
     val uiState by crankAiViewModel.uiState.collectAsState()
     val view = LocalView.current
+    // Read the accent here: a drawBehind lambda is not a @Composable scope.
+    val accentColor = ChampagneGold
+    val accentDark = GoldDark
     val listState = rememberLazyListState()
     var showInput by remember { mutableStateOf(true) }
 
@@ -365,8 +368,8 @@ fun CrankAIScreen(
                                     brush = Brush.radialGradient(
                                         colors = listOf(
                                             Color(0xFFFFC107),
-                                            ChampagneGold,
-                                            GoldDark
+                                            accentColor,
+                                            accentDark
                                         )
                                     )
                                 )
