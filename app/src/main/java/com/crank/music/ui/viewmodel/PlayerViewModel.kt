@@ -106,8 +106,7 @@ class PlayerViewModel @Inject constructor(
     private val _currentSongDownloadState = MutableStateFlow(DownloadState.IDLE)
     val currentSongDownloadState: StateFlow<DownloadState> = _currentSongDownloadState.asStateFlow()
 
-    private val playHistory = mutableListOf<Song>()
-    private var historyIndex = -1
+    private val playHistory = PlaybackHistory()
 
     private var sleepTimerJob: Job? = null
     private var positionSaveJob: Job? = null
@@ -782,11 +781,7 @@ class PlayerViewModel @Inject constructor(
         if (failedRetryTokens.size > MAX_RETRY_TOKENS) failedRetryTokens.clear()
         failedRetryTokens.remove(token)
 
-        if (historyIndex >= 0 && historyIndex < playHistory.size - 1) {
-            playHistory.subList(historyIndex + 1, playHistory.size).clear()
-        }
-        playHistory.add(song)
-        historyIndex = playHistory.size - 1
+        playHistory.record(song)
 
         viewModelScope.launch {
             _playerState.update { it.copy(isLoading = true, errorMessage = null) }
@@ -1010,34 +1005,37 @@ class PlayerViewModel @Inject constructor(
     }
 
     fun playPrevious() {
-        if (playHistory.size > 1 && historyIndex > 0) {
-            historyIndex--
-            val prevSong = playHistory[historyIndex]
+        val prevSong = playHistory.previous()
 
-            // Claim the play slot, exactly as playSong does. Without this, a resolve still in
-            // flight for the track the user was on would win the race and overwrite the
-            // previous track — the same wrong-song defect, reached from the other direction.
-            val token = playRequestCounter.incrementAndGet()
-            activePlayToken = token
+        if (prevSong == null) {
+            // No earlier track: restart the current one rather than doing nothing. This branch is
+            // reached both before anything has played and when we are already at the start of the
+            // trail.
+            player.seekTo(0)
+            return
+        }
 
-            viewModelScope.launch {
-                _playerState.update { it.copy(isLoading = true, errorMessage = null) }
-                try {
-                    resolveAndPlay(prevSong, reason = "Previous", token = token)
-                } catch (e: Exception) {
-                    Log.e("CRANK_PLAYER", "Failed to play previous: ${e.message}")
-                    if (!isSuperseded(token)) {
-                        _playerState.update {
-                            it.copy(
-                                isLoading = false,
-                                errorMessage = "Failed to load: ${e.message ?: "Unknown error"}",
-                            )
-                        }
+        // Claim the play slot, exactly as playSong does. Without this, a resolve still in
+        // flight for the track the user was on would win the race and overwrite the
+        // previous track — the same wrong-song defect, reached from the other direction.
+        val token = playRequestCounter.incrementAndGet()
+        activePlayToken = token
+
+        viewModelScope.launch {
+            _playerState.update { it.copy(isLoading = true, errorMessage = null) }
+            try {
+                resolveAndPlay(prevSong, reason = "Previous", token = token)
+            } catch (e: Exception) {
+                Log.e("CRANK_PLAYER", "Failed to play previous: ${e.message}")
+                if (!isSuperseded(token)) {
+                    _playerState.update {
+                        it.copy(
+                            isLoading = false,
+                            errorMessage = "Failed to load: ${e.message ?: "Unknown error"}",
+                        )
                     }
                 }
             }
-        } else {
-            player.seekTo(0)
         }
     }
 
@@ -1137,7 +1135,7 @@ class PlayerViewModel @Inject constructor(
                 // Discard anything that arrives after the user has moved on. Compared on id
                 // because the same track may be re-requested; a late response for the *same*
                 // song is still correct and harmless.
-                if (_playerState.value.currentSong?.id != song.id) {
+                if (!lyricsAreForCurrentTrack(song.id, _playerState.value.currentSong?.id)) {
                     Log.d(
                         "CRANK_LYRICS",
                         "Discarding lyrics for '${song.title}': no longer the current track",
@@ -1251,3 +1249,19 @@ class PlayerViewModel @Inject constructor(
         )
     }
 }
+
+/**
+ * True when lyrics fetched for [requestedSongId] still correspond to the track now playing.
+ *
+ * Lyrics are loaded asynchronously. If the user skips before they arrive, the response is for a
+ * track that is no longer current, and rendering it would put the wrong song's words under the
+ * right title — the exact mismatch the "every surface refers to the same track" requirement
+ * forbids. This single check is what keeps lyrics aligned with the playing track. It is a
+ * top-level function (not a method) so it can be unit-tested without an Android runtime.
+ *
+ * Compared on id rather than object identity: the same track is often requested more than once
+ * (e.g. replay), and a late response for the *same* song is still correct and must not be
+ * discarded.
+ */
+internal fun lyricsAreForCurrentTrack(requestedSongId: String, currentSongId: String?): Boolean =
+    currentSongId == requestedSongId
