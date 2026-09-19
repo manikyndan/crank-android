@@ -69,8 +69,14 @@ android {
         applicationId = "com.crank.music"
         minSdk = 24
         targetSdk = 37
-        versionCode = 1
-        versionName = "1.0"
+        // Must stay ahead of whatever is installed on test devices. The debug
+        // builds previously installed on the SM-A356E were versionCode 3, while
+        // this file had drifted to 1 — so installing over them failed with
+        // INSTALL_FAILED_VERSION_DOWNGRADE, and `connectedDebugAndroidTest`
+        // reported success while silently running zero tests as a result.
+        // Always bump this before installing over an existing build.
+        versionCode = 4
+        versionName = "1.0.3"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
