@@ -1,6 +1,7 @@
 package com.crank.music.data.remote.innertube
 
 import android.util.Log
+import com.crank.music.data.remote.ArtworkUrl
 import com.crank.music.domain.model.Album
 import com.crank.music.domain.model.Song
 import io.ktor.client.HttpClient
@@ -607,6 +608,17 @@ class InnerTubeApi @Inject constructor(
         return null
     }
 
+    /**
+     * The artwork URL for [item], at the highest resolution the source will serve.
+     *
+     * ## Why the offered URL is not used as-is
+     *
+     * YouTube Music returns whatever size it happens to need for the surface it is rendering, not
+     * the best one available. Measured on device, the same album art is served at `=w120-h120` in
+     * one response and `=w544-h544` in another, and both were previously passed straight to the UI —
+     * a 120 px image stretched across a 300 dp player artwork is exactly the "blurry song image" the
+     * user sees. [ArtworkUrl] has the reasoning for each host.
+     */
     private fun extractArtworkUrl(item: JsonObject): String {
         val thumbnails = item["thumbnail"]?.jsonObject?.get("musicThumbnailRenderer")?.jsonObject
             ?.get("thumbnail")?.jsonObject?.get("thumbnails")?.jsonArray
@@ -614,35 +626,11 @@ class InnerTubeApi @Inject constructor(
             ?: item["thumbnailRenderer"]?.jsonObject?.get("musicThumbnailRenderer")?.jsonObject
                 ?.get("thumbnail")?.jsonObject?.get("thumbnails")?.jsonArray
 
-        val rawUrl = thumbnails?.lastOrNull()?.jsonObject?.get("url")?.jsonPrimitive?.content ?: ""
-        val baseUrl = when {
-            rawUrl.isBlank() -> ""
-            rawUrl.startsWith("//") -> "https:$rawUrl"
-            else -> rawUrl
-        }
-
-        if (baseUrl.isBlank()) return ""
-
-        // Upgrade to high-res if it's a YouTube thumbnail
-        return when {
-            baseUrl.contains("ytimg.com") -> {
-                // Extract video ID from thumbnail URL and use maxresdefault
-                val videoIdMatch = Regex("""vi/([^/]+)/""").find(baseUrl)
-                if (videoIdMatch != null) {
-                    val videoId = videoIdMatch.groupValues[1]
-                    "https://i.ytimg.com/vi/$videoId/maxresdefault.jpg"
-                } else {
-                    baseUrl.replace("default.jpg", "hqdefault.jpg")
-                        .replace("mqdefault.jpg", "hqdefault.jpg")
-                }
-            }
-            baseUrl.contains("iTunes") || baseUrl.contains("apple") -> {
-                // iTunes: upgrade from 100x100 to 600x600
-                baseUrl.replace("100x100bb", "600x600bb")
-                    .replace("100x100", "600x600")
-            }
-            else -> baseUrl
-        }
+        // Widest offered, rather than last: the array is usually ascending but is not guaranteed
+        // to be, and "last" silently degrades to the smallest if it ever ships the other way round.
+        return ArtworkUrl.bestOf(
+            thumbnails?.mapNotNull { it.jsonObject["url"]?.jsonPrimitive?.content }.orEmpty()
+        )
     }
 
     private fun parseDuration(duration: String): Long {

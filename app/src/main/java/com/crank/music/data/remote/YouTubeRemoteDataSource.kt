@@ -58,7 +58,7 @@ class YouTubeRemoteDataSource @Inject constructor(
                         // 0 means "unknown" honestly; the UI decides how to render an unknown
                         // duration. Inventing 3:00 here put a wrong length on screen.
                         durationMs = if (item.duration > 0) item.duration * 1000L else 0L,
-                        artworkUrl = item.thumbnails.lastOrNull()?.url ?: "",
+                        artworkUrl = ArtworkUrl.bestOf(item.thumbnails.map { it.url }),
                         isLocal = false,
                         streamUrl = videoId
                     )
@@ -108,7 +108,7 @@ class YouTubeRemoteDataSource @Inject constructor(
                         // The search extractor does not give us a release year. Empty string means
                         // "not known"; hardcoding "2024" asserted a fact we never had.
                         releaseYear = "",
-                        artworkUrl = item.thumbnails.lastOrNull()?.url ?: "",
+                        artworkUrl = ArtworkUrl.bestOf(item.thumbnails.map { it.url }),
                         trackCount = item.streamCount.toInt()
                     )
                 }

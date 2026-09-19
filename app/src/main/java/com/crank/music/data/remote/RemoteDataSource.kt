@@ -76,7 +76,7 @@ class RemoteDataSourceImpl @Inject constructor(
     private fun ITunesTrackDto.toSong(): Song? {
         val name = trackName ?: return null
         val stream = previewUrl ?: return null
-        val artwork = artworkUrl100?.replace("100x100bb", "600x600bb")?.replace("100x100", "600x600").orEmpty()
+        val artwork = ArtworkUrl.upgrade(artworkUrl100.orEmpty())
 
         return Song(
             id = trackId?.toString() ?: UUID.randomUUID().toString(),
@@ -93,7 +93,7 @@ class RemoteDataSourceImpl @Inject constructor(
     }
 
     private fun ITunesTrackDto.toAlbum(): Album {
-        val artwork = artworkUrl100?.replace("100x100bb", "600x600bb")?.replace("100x100", "600x600").orEmpty()
+        val artwork = ArtworkUrl.upgrade(artworkUrl100.orEmpty())
         val year = releaseDate?.take(4) ?: "2024"
 
         return Album(
