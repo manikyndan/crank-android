@@ -3,6 +3,7 @@ package com.crank.music.data.remote.innertube
 import android.util.Log
 import com.crank.music.data.remote.ArtworkUrl
 import com.crank.music.domain.model.Album
+import com.crank.music.domain.model.AlbumWithKind
 import com.crank.music.domain.model.Song
 import io.ktor.client.HttpClient
 import io.ktor.client.call.body
@@ -39,6 +40,10 @@ class InnerTubeApi @Inject constructor(
 
         /** YouTube addresses albums/singles/EPs with browse ids starting `MPRE`. */
         private const val ALBUM_BROWSE_PREFIX = "MPRE"
+
+        /** Safety caps for continuation chains: bounds a runaway chain, not a real album. */
+        private const val MAX_BROWSE_TRACKS = 500
+        private const val MAX_BROWSE_PAGES = 10
 
         /** Renderers that can hold `musicResponsiveListItemRenderer` rows. See [listRowsIn]. */
         private val ROW_CONTAINERS = listOf(
@@ -156,7 +161,15 @@ class InnerTubeApi @Inject constructor(
      * The response order is the relevance order YouTube returned; callers must
      * not re-sort it.
      */
-    suspend fun searchAlbums(query: String): List<Album> {
+    suspend fun searchAlbums(query: String): List<Album> =
+        searchAlbumsWithKind(query).map { it.album }
+
+    /**
+     * Album cards with their release kind ("Single"/"EP"/"" for full albums
+     * and undeclared cards). Shares the request and parse with [searchAlbums]
+     * so the two can never disagree on what matched.
+     */
+    suspend fun searchAlbumsWithKind(query: String): List<AlbumWithKind> {
         if (query.isBlank()) return emptyList()
 
         return try {
@@ -177,7 +190,7 @@ class InnerTubeApi @Inject constructor(
                 ?: return emptyList()
 
             val seen = LinkedHashSet<String>()
-            val albums = mutableListOf<Album>()
+            val albums = mutableListOf<AlbumWithKind>()
 
             for (tab in contents) {
                 val sectionList = tab.jsonObject
@@ -189,42 +202,9 @@ class InnerTubeApi @Inject constructor(
 
                 for (section in sectionList) {
                     for (card in twoRowItemsIn(section.jsonObject)) {
-                        val browseId = card
-                            .get("navigationEndpoint")?.jsonObject
-                            ?.get("browseEndpoint")?.jsonObject
-                            ?.get("browseId")?.jsonPrimitive?.content
-                            ?: continue
-                        if (!browseId.startsWith(ALBUM_BROWSE_PREFIX)) continue
-                        if (!seen.add(browseId)) continue
-
-                        val title = card
-                            .get("title")?.jsonObject
-                            ?.get("runs")?.jsonArray
-                            ?.firstOrNull()?.jsonObject
-                            ?.get("text")?.jsonPrimitive?.content ?: continue
-
-                        val subtitle = card
-                            .get("subtitle")?.jsonObject
-                            ?.get("runs")?.jsonArray
-                            ?.joinToString("") {
-                                it.jsonObject.get("text")?.jsonPrimitive?.content ?: ""
-                            } ?: ""
-
-                        val (artistName, year) = parseSearchAlbumSubtitle(subtitle)
-                        val artworkUrl = extractArtworkUrl(card)
-
-                        albums.add(
-                            Album(
-                                id = browseId,
-                                title = title,
-                                artistName = artistName,
-                                releaseYear = year,
-                                artworkUrl = artworkUrl,
-                                // Search cards carry no track count; 0 renders as unknown,
-                                // which is honest — the detail screen counts the real list.
-                                trackCount = 0
-                            )
-                        )
+                        val parsed = parseSearchAlbumCard(card) ?: continue
+                        if (!seen.add(parsed.album.id)) continue
+                        albums.add(parsed)
                     }
                 }
             }
@@ -233,6 +213,50 @@ class InnerTubeApi @Inject constructor(
             Log.e("CRANK_INTEGRATION", "InnerTube album search failed: ${e.message}", e)
             emptyList()
         }
+    }
+
+    /**
+     * One album card: the MPRE filter, title, artist/year and release kind.
+     * Null when the card is not an album or carries no usable title — same
+     * rules as before, shared by both album-search entry points.
+     */
+    private fun parseSearchAlbumCard(card: JsonObject): AlbumWithKind? {
+        val browseId = card
+            .get("navigationEndpoint")?.jsonObject
+            ?.get("browseEndpoint")?.jsonObject
+            ?.get("browseId")?.jsonPrimitive?.content
+            ?: return null
+        if (!browseId.startsWith(ALBUM_BROWSE_PREFIX)) return null
+
+        val title = card
+            .get("title")?.jsonObject
+            ?.get("runs")?.jsonArray
+            ?.firstOrNull()?.jsonObject
+            ?.get("text")?.jsonPrimitive?.content ?: return null
+
+        val subtitle = card
+            .get("subtitle")?.jsonObject
+            ?.get("runs")?.jsonArray
+            ?.joinToString("") {
+                it.jsonObject.get("text")?.jsonPrimitive?.content ?: ""
+            } ?: ""
+
+        val (artistName, year) = parseSearchAlbumSubtitle(subtitle)
+        val artworkUrl = extractArtworkUrl(card)
+
+        return AlbumWithKind(
+            album = Album(
+                id = browseId,
+                title = title,
+                artistName = artistName,
+                releaseYear = year,
+                artworkUrl = artworkUrl,
+                // Search cards carry no track count; 0 renders as unknown,
+                // which is honest — the detail screen counts the real list.
+                trackCount = 0
+            ),
+            kind = parseSearchAlbumKind(subtitle)
+        )
     }
 
     /**
@@ -372,30 +396,61 @@ class InnerTubeApi @Inject constructor(
                     shelfSections(browseContents["twoColumnBrowseResultsRenderer"]?.jsonObject)
 
             val songs = mutableListOf<Song>()
+            var droppedRows = 0
+            // The shelf holding the most tracks is the real tracklist; a page can also
+            // carry secondary shelves ("more from this artist") whose continuations
+            // must never be followed — they would append another album's songs.
+            var primaryContinuation: String? = null
+            var primaryTrackCount = -1
             for (sectionObj in sections) {
                 // Albums expose tracks via musicShelfRenderer; playlists via musicPlaylistShelfRenderer.
                 val shelf = sectionObj["musicShelfRenderer"]?.jsonObject
                     ?: sectionObj["musicPlaylistShelfRenderer"]?.jsonObject
                     ?: continue
-                val items = shelf["contents"]?.jsonArray ?: continue
-                for (item in items) {
-                    val track = item.jsonObject["musicResponsiveListItemRenderer"]?.jsonObject ?: continue
-                    val videoId = extractVideoId(track) ?: continue
-                    val (title, artistName, durationMs) = parseTrackColumns(track)
-                    val artworkUrl = extractArtworkUrl(track)
-                    songs.add(
-                        Song(
-                            id = videoId,
-                            title = title,
-                            artistName = artistName,
-                            albumId = browseId,
-                            durationMs = durationMs,
-                            artworkUrl = artworkUrl,
-                            isLocal = false,
-                            streamUrl = videoId
-                        )
-                    )
+                val (parsed, dropped) = parseShelfTracks(shelf, browseId)
+                droppedRows += dropped
+                songs.addAll(parsed)
+                if (parsed.size > primaryTrackCount) {
+                    primaryTrackCount = parsed.size
+                    primaryContinuation = shelfContinuationToken(shelf)
                 }
+            }
+
+            // Long or collapsed shelves arrive as a first page plus continuation
+            // tokens. Previously those tokens were ignored, so such albums rendered
+            // only their first page of tracks. Follow the primary shelf's chain in
+            // response order; the caps bound a runaway chain, not a real album.
+            var continuation = primaryContinuation
+            var extraPages = 0
+            while (continuation != null &&
+                songs.size < MAX_BROWSE_TRACKS &&
+                extraPages < MAX_BROWSE_PAGES
+            ) {
+                val contBody = buildJsonObject {
+                    put("context", innerTubeContext)
+                    put("continuation", JsonPrimitive(continuation))
+                }
+                val contResponse: JsonObject = client.post {
+                    url(innerTubeConfig.withMusicKey("browse"))
+                    contentType(ContentType.Application.Json)
+                    setBody(contBody)
+                }.body()
+
+                val contContents = contResponse["continuationContents"]?.jsonObject
+                val contShelf = contContents?.get("musicShelfContinuation")?.jsonObject
+                    ?: contContents?.get("musicPlaylistShelfContinuation")?.jsonObject
+                if (contShelf == null) break
+
+                val (parsed, dropped) = parseShelfTracks(contShelf, browseId)
+                droppedRows += dropped
+                if (parsed.isEmpty()) break
+                songs.addAll(parsed)
+                continuation = shelfContinuationToken(contShelf)
+                extraPages++
+            }
+
+            if (droppedRows > 0) {
+                Log.d(TAG, "Browse '$browseId': parsed ${songs.size}, skipped $droppedRows unresolvable rows")
             }
             songs
         } catch (e: CancellationException) {
@@ -434,6 +489,59 @@ class InnerTubeApi @Inject constructor(
         }
 
         return sections
+    }
+
+    /**
+     * Parses every track row of one shelf, preserving response order.
+     *
+     * Returns the parsed songs plus the number of rows skipped because no
+     * video id could be resolved for them. Skips are counted, not silently
+     * absorbed, so a shelf that mostly fails to parse shows up in logs rather
+     * than as a mysteriously short album.
+     */
+    private fun parseShelfTracks(shelf: JsonObject, albumId: String): Pair<List<Song>, Int> {
+        val songs = mutableListOf<Song>()
+        var dropped = 0
+        val items = shelf["contents"]?.jsonArray ?: return songs to dropped
+        for (item in items) {
+            val track = item.jsonObject["musicResponsiveListItemRenderer"]?.jsonObject
+                ?: run { dropped++; continue }
+            val videoId = extractVideoId(track) ?: run { dropped++; continue }
+            val (title, artistName, durationMs) = parseTrackColumns(track)
+            val artworkUrl = extractArtworkUrl(track)
+            songs.add(
+                Song(
+                    id = videoId,
+                    title = title,
+                    artistName = artistName,
+                    albumId = albumId,
+                    durationMs = durationMs,
+                    artworkUrl = artworkUrl,
+                    isLocal = false,
+                    streamUrl = videoId
+                )
+            )
+        }
+        return songs to dropped
+    }
+
+    /**
+     * The next-page token of a track shelf, or `null` when the shelf is complete.
+     *
+     * Lives on the shelf itself under `continuations[].nextContinuationData`
+     * (radio shelves use `nextRadioContinuationData`). A missing token is the
+     * normal complete state, not an error.
+     */
+    private fun shelfContinuationToken(shelf: JsonObject): String? {
+        val continuations = shelf["continuations"]?.jsonArray ?: return null
+        for (entry in continuations) {
+            val data = entry.jsonObject["nextContinuationData"]?.jsonObject
+                ?: entry.jsonObject["nextRadioContinuationData"]?.jsonObject
+                ?: continue
+            val token = data["continuation"]?.jsonPrimitive?.content
+            if (!token.isNullOrBlank()) return token
+        }
+        return null
     }
 
     /**
@@ -835,12 +943,25 @@ internal fun parseAlbumSubtitle(subtitle: String): Pair<String, String> {
  * year rule (four digits only) is the same honest rule as there.
  */
 internal fun parseSearchAlbumSubtitle(subtitle: String): Pair<String, String> {
-    val typeTokens = setOf("Album", "Single", "EP", "Playlist", "Artist")
     val fields = subtitle.split("•").map { it.trim() }.filter { it.isNotEmpty() }
-    val withoutType = if (fields.firstOrNull() in typeTokens) fields.drop(1) else fields
+    val withoutType = if (fields.firstOrNull() in SEARCH_TYPE_TOKENS) fields.drop(1) else fields
     val artist = withoutType.firstOrNull() ?: "Unknown Artist"
     val year = withoutType.drop(1)
         .firstOrNull { it.length == 4 && it.all { c -> c.isDigit() } }
         .orEmpty()
     return artist to year
+}
+
+/** Release-type tokens that lead a search card subtitle ("Album • …", "Single • …"). */
+private val SEARCH_TYPE_TOKENS = setOf("Album", "Single", "EP", "Playlist", "Artist")
+
+/**
+ * The release type declared by a search card subtitle, or "" when it declares
+ * none. Separate from [parseSearchAlbumSubtitle] so that function's tested
+ * contract is untouched; callers that need the kind (albums vs singles) read
+ * it here instead of re-splitting the same string a third way.
+ */
+internal fun parseSearchAlbumKind(subtitle: String): String {
+    val first = subtitle.split("•").map { it.trim() }.firstOrNull().orEmpty()
+    return if (first == "Single" || first == "EP") first else ""
 }

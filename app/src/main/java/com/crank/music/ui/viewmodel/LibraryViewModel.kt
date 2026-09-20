@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.crank.music.core.rethrowIfCancellation
 import com.crank.music.data.local.SongDao
+import com.crank.music.data.local.toEntity
 import com.crank.music.domain.model.Playlist
 import com.crank.music.domain.model.Song
 import com.crank.music.domain.repository.MusicRepository
@@ -105,12 +106,13 @@ enum class LibrarySection(val slug: String, val label: String) {
     ALBUMS("albums", "Albums"),
     SONGS("songs", "Songs"),
     DOWNLOADED("downloaded", "Downloaded"),
-    RECENTLY_ADDED("recently_added", "Recently Added");
+    RECENTLY_ADDED("recently_added", "Recently Added"),
+    HISTORY("history", "History");
 
     companion object {
         /** Ordered exactly as the tab row renders them. */
         val ordered: List<LibrarySection> = listOf(
-            ALL, PLAYLISTS, ARTISTS, ALBUMS, SONGS, DOWNLOADED, RECENTLY_ADDED
+            ALL, PLAYLISTS, ARTISTS, ALBUMS, SONGS, DOWNLOADED, RECENTLY_ADDED, HISTORY
         )
 
         fun fromSlug(slug: String?): LibrarySection =
@@ -191,6 +193,12 @@ internal fun com.crank.music.data.local.HistoryEntity.toSong(): Song = Song(
     streamUrl = streamUrl,
 )
 
+/** One history row with its real play timestamp, for date grouping. */
+data class HistoryItem(
+    val song: Song,
+    val playedAt: Long,
+)
+
 data class LibraryUiState(
     val isGridView: Boolean = false,
     val selectedSection: LibrarySection = LibrarySection.ALL,
@@ -200,6 +208,7 @@ data class LibraryUiState(
     val songs: List<Song> = emptyList(),
     val downloadedSongs: List<Song> = emptyList(),
     val recentlyAdded: List<Song> = emptyList(),
+    val historyItems: List<HistoryItem> = emptyList(),
     val smartPlaylists: List<SmartPlaylist> = emptyList(),
     /**
      * Contents of each smart playlist, keyed by slug. Resolved once during load and read
@@ -247,6 +256,17 @@ class LibraryViewModel @Inject constructor(
                 // work immediately instead of running to completion against a dead scope.
                 val likedSongs = loadSongs("liked songs") { songDao.getLikedSongsList() }
                 val downloadedSongs = loadSongs("downloads") { songDao.getDownloadedSongs() }
+                val historyItems = try {
+                    withContext(Dispatchers.IO) {
+                        songDao.getHistoryList(100).map { entity ->
+                            HistoryItem(song = entity.toSong(), playedAt = entity.playedAt)
+                        }
+                    }
+                } catch (e: Exception) {
+                    e.rethrowIfCancellation()
+                    Log.e("CRANK_LIBRARY", "Failed to load history: ${e.message}")
+                    emptyList()
+                }
 
                 val playlists = try {
                     withContext(Dispatchers.IO) {
@@ -310,6 +330,7 @@ class LibraryViewModel @Inject constructor(
                     songs = likedSongs,
                     downloadedSongs = downloadedSongs,
                     recentlyAdded = likedSongs.take(SmartPlaylistKind.RECENTLY_ADDED_LIMIT),
+                    historyItems = historyItems,
                     smartPlaylists = smartPlaylists,
                     smartPlaylistContents = contents,
                     isLoading = false
@@ -398,6 +419,14 @@ class LibraryViewModel @Inject constructor(
      */
     fun resolveSmartPlaylist(slug: String): List<Song> =
         _uiState.value.smartPlaylistContents[slug].orEmpty()
+
+    /**
+     * Reloads the library, e.g. when navigating back after listening, liking
+     * or downloading. Local-database reads only, so this is cheap.
+     */
+    fun refresh() {
+        loadLibraryData()
+    }
 
     fun toggleViewMode() {
         _uiState.value = _uiState.value.copy(isGridView = !_uiState.value.isGridView)
@@ -550,6 +579,65 @@ class LibraryViewModel @Inject constructor(
                 e.rethrowIfCancellation()
                 Log.e("CRANK_LIBRARY", "Failed to delete playlist: ${e.message}")
             }
+        }
+    }
+
+    /**
+     * Adds [song] to a user playlist, creating the membership row and
+     * refreshing the card's count/artwork. The song row itself is persisted
+     * (preserving an existing liked flag) so the detail screen can resolve it.
+     */
+    fun addSongToPlaylist(playlistId: String, song: Song) {
+        viewModelScope.launch {
+            try {
+                withContext(Dispatchers.IO) {
+                    if (songDao.getSongById(song.id) == null) {
+                        songDao.insertSong(song.toEntity())
+                    }
+                    val order = songDao.getSongIdsForPlaylist(playlistId).size
+                    songDao.insertPlaylistSong(
+                        com.crank.music.data.local.PlaylistSongCrossRef(
+                            playlistId = playlistId,
+                            songId = song.id,
+                            songOrder = order
+                        )
+                    )
+                    val entity = songDao.getPlaylistById(playlistId)
+                    if (entity != null) {
+                        val ids = songDao.getSongIdsForPlaylist(playlistId)
+                        songDao.insertPlaylist(
+                            entity.copy(
+                                songCount = ids.size,
+                                artworkUrl = entity.artworkUrl.ifBlank { song.artworkUrl }
+                            )
+                        )
+                    }
+                }
+                refreshPlaylists()
+            } catch (e: Exception) {
+                e.rethrowIfCancellation()
+                Log.e("CRANK_LIBRARY", "Failed to add song to playlist: ${e.message}")
+            }
+        }
+    }
+
+    private suspend fun refreshPlaylists() {
+        try {
+            val playlists = withContext(Dispatchers.IO) {
+                songDao.getPlaylists().map { entity ->
+                    Playlist(
+                        id = entity.id,
+                        title = entity.title,
+                        songCount = entity.songCount,
+                        artworkUrl = entity.artworkUrl,
+                        songs = emptyList()
+                    )
+                }
+            }
+            _uiState.value = _uiState.value.copy(playlists = playlists)
+        } catch (e: Exception) {
+            e.rethrowIfCancellation()
+            Log.e("CRANK_LIBRARY", "Failed to refresh playlists: ${e.message}")
         }
     }
 

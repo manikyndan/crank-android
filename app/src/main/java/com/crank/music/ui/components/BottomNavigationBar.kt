@@ -8,6 +8,7 @@ import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
@@ -31,7 +32,6 @@ import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.LibraryMusic
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Pause
-import androidx.compose.material.icons.outlined.MusicNote
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.outlined.Explore
@@ -39,6 +39,7 @@ import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material.icons.outlined.LibraryMusic
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -87,15 +88,6 @@ sealed class NavItem(
     object Search : NavItem("search", "Search", Icons.Filled.Search, Icons.Outlined.Search)
 
     /**
-     * NEW additive destination: YouTube Music-style home feed.
-     *
-     * Added alongside the existing four tabs; none of the existing routes,
-     * labels or icons were touched. Remove this object + its MainScreen
-     * composable to revert without affecting anything else.
-     */
-    object Discover : NavItem("ytmusic_home", "Discover", Icons.Filled.MusicNote, Icons.Outlined.MusicNote)
-
-    /**
      * Removed: `Create` ("Crank AI") and `You`.
      *
      * `You` routed to `ProfileScreen`, which was the only entry point for Settings, Downloads,
@@ -115,7 +107,6 @@ fun BottomNavigationBar(
     val items = listOf(
         NavItem.Home,
         NavItem.Browse,
-        NavItem.Discover,
         NavItem.Library,
         NavItem.Search
     )
@@ -241,7 +232,9 @@ fun MiniPlayer(
     errorMessage: String? = null,
     onPlayPauseClick: () -> Unit = {},
     onPlayerClick: () -> Unit = {},
-    onSwipeUp: () -> Unit = {}
+    onSwipeUp: () -> Unit = {},
+    onNextClick: () -> Unit = {},
+    onPreviousClick: () -> Unit = {}
 ) {
     var dragOffset by remember { mutableStateOf(0f) }
 
@@ -279,29 +272,36 @@ fun MiniPlayer(
         shadowElevation = 8.dp
     ) {
         Column(modifier = Modifier.fillMaxWidth()) {
-            // Thin progress hairline along the very top edge, accent-tinted.
-            LinearProgressIndicator(
-                progress = { progress.coerceIn(0f, 1f) },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(2.dp),
-                color = MaterialTheme.colorScheme.primary,
-                trackColor = Color.Transparent,
-                drawStopIndicator = {}
-            )
-
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 12.dp, vertical = 8.dp)
             ) {
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .pointerInput(onNextClick, onPreviousClick) {
+                            var totalX = 0f
+                            detectHorizontalDragGestures(
+                                onDragCancel = { totalX = 0f },
+                                onDragEnd = {
+                                    when {
+                                        totalX < -160f -> onNextClick()
+                                        totalX > 160f -> onPreviousClick()
+                                    }
+                                    totalX = 0f
+                                },
+                                onHorizontalDrag = { change, dragAmount ->
+                                    change.consume()
+                                    totalX += dragAmount
+                                }
+                            )
+                        },
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Surface(
-                        modifier = Modifier.size(48.dp),
-                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.size(40.dp),
+                        shape = RoundedCornerShape(4.dp),
                         color = MaterialTheme.colorScheme.background,
                         tonalElevation = 1.dp,
                         shadowElevation = 2.dp
@@ -364,40 +364,33 @@ fun MiniPlayer(
 
                     Spacer(modifier = Modifier.width(8.dp))
 
-                    // Clearly tappable 44dp target: accent-tinted disc. The scale
-                    // spring fires on every tap because each tap flips isPlaying.
+                    // Plain Apple-style glyph on a 48dp touch target.
                     if (!isLoading) {
-                        val pressScale by animateFloatAsState(
-                            targetValue = if (isPlaying) 1f else 0.9f,
-                            animationSpec = spring(
-                                dampingRatio = Spring.DampingRatioMediumBouncy,
-                                stiffness = Spring.StiffnessMedium
-                            ),
-                            label = "mini_press"
-                        )
-                        Surface(
-                            modifier = Modifier
-                                .size(44.dp)
-                                .graphicsLayer {
-                                    scaleX = pressScale
-                                    scaleY = pressScale
-                                },
-                            shape = CircleShape,
-                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.14f),
-                            onClick = onPlayPauseClick
+                        IconButton(
+                            onClick = onPlayPauseClick,
+                            modifier = Modifier.size(48.dp)
                         ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Icon(
-                                    imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                                    contentDescription = if (isPlaying) "Pause" else "Play",
-                                    tint = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.size(26.dp)
-                                )
-                            }
+                            Icon(
+                                imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                                contentDescription = if (isPlaying) "Pause" else "Play",
+                                tint = MaterialTheme.colorScheme.onSurface,
+                                modifier = Modifier.size(30.dp)
+                            )
                         }
                     }
                 }
             }
+
+            // Thin progress hairline along the very bottom edge, accent-tinted.
+            LinearProgressIndicator(
+                progress = { progress.coerceIn(0f, 1f) },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(2.dp),
+                color = MaterialTheme.colorScheme.primary,
+                trackColor = Color.Transparent,
+                drawStopIndicator = {}
+            )
         }
     }
 }

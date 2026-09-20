@@ -1,21 +1,7 @@
 package com.crank.music.ui.screens
 
 import android.view.HapticFeedbackConstants
-import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.spring
-import androidx.compose.animation.core.tween
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectHorizontalDragGestures
-import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -25,191 +11,371 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Notifications
-import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.automirrored.filled.TrendingDown
-import androidx.compose.material.icons.automirrored.filled.TrendingUp
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material3.Button
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
-import coil3.compose.AsyncImage
-import com.crank.music.domain.model.Collection
+import com.crank.music.domain.model.Album
 import com.crank.music.domain.model.Song
+import com.crank.music.feature.ytmusic.YtArtistCard
+import com.crank.music.feature.ytmusic.YtAlbumCard
+import com.crank.music.feature.ytmusic.YtCategoryChip
+import com.crank.music.feature.ytmusic.YtContinueCard
+import com.crank.music.feature.ytmusic.YtHorizontalScrollSection
+import com.crank.music.feature.ytmusic.YtLibraryPickCard
+import com.crank.music.feature.ytmusic.YtLoadingRow
+import com.crank.music.feature.ytmusic.YtMixCard
+import com.crank.music.feature.ytmusic.YtMoodTile
+import com.crank.music.feature.ytmusic.YtMusicHomeViewModel
+import com.crank.music.feature.ytmusic.YtQuickPickCard
+import com.crank.music.feature.ytmusic.YtSectionHeader
+import com.crank.music.feature.ytmusic.YtTrendingCard
 import com.crank.music.ui.components.NotificationPanel
-import com.crank.music.ui.theme.CharcoalElevated
-import com.crank.music.ui.theme.TextSecondary
-import com.crank.music.ui.components.ShimmerBox
-import com.crank.music.ui.components.StaggeredFadeIn
-import com.crank.music.ui.viewmodel.HomeViewModel
+import com.crank.music.ui.theme.CrankSpacing
 import com.crank.music.ui.viewmodel.NotificationViewModel
-import kotlin.math.roundToInt
 
+/**
+ * Home = YouTube Music-style header (Home title, search, notifications,
+ * profile) + the Discover feed as its body, bound to [YtMusicHomeViewModel].
+ * Player wiring is unchanged.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HomeScreen(
-    homeViewModel: HomeViewModel = hiltViewModel(),
     notificationViewModel: NotificationViewModel = hiltViewModel(),
+    ytMusicHomeViewModel: YtMusicHomeViewModel = hiltViewModel(),
     onSongSelect: (Song) -> Unit = {},
     onSongSelectWithContext: (Song, List<Song>) -> Unit = { song, _ -> onSongSelect(song) },
     onPlaylistClick: (String) -> Unit = {},
-    /** Opens the profile/You tab. Was previously a haptic tick with no destination. */
-    onProfileClick: () -> Unit = {}
+    /** Opens Settings. Kept on the profile disc: it is the only route there. */
+    onProfileClick: () -> Unit = {},
+    /** Opens the Search tab. */
+    onSearchClick: () -> Unit = {},
+    onAlbumClick: (Album) -> Unit = {},
+    onArtistClick: (String) -> Unit = {},
 ) {
-    val uiState by homeViewModel.uiState.collectAsState()
     val notifState by notificationViewModel.uiState.collectAsState()
-    val view = LocalView.current
+    val feedState by ytMusicHomeViewModel.uiState.collectAsState()
+    val view = androidx.compose.ui.platform.LocalView.current
 
     NotificationPanel(viewModel = notificationViewModel)
 
-    LazyColumn(
+    PullToRefreshBox(
+        isRefreshing = feedState.isLoading && feedState.quickPicks.isNotEmpty(),
+        onRefresh = { ytMusicHomeViewModel.load() },
         modifier = Modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background),
-        contentPadding = PaddingValues(bottom = 100.dp),
-        verticalArrangement = Arrangement.spacedBy(0.dp)
     ) {
-        item {
-            GreetingHeader(
-                greeting = uiState.greeting,
-                notificationCount = if (notifState.hasUnread) notifState.unreadCount else 0,
-                onNotificationClick = {
-                    notificationViewModel.openPanel()
-                    view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
-                },
-                onProfileClick = {
-                    view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
-                    onProfileClick()
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(bottom = 100.dp),
+            verticalArrangement = Arrangement.spacedBy(26.dp)
+        ) {
+            item {
+                YtHomeHeader(
+                    notificationCount = if (notifState.hasUnread) notifState.unreadCount else 0,
+                    onSearchClick = {
+                        view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+                        onSearchClick()
+                    },
+                    onNotificationClick = {
+                        notificationViewModel.openPanel()
+                        view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+                    },
+                    onProfileClick = {
+                        view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+                        onProfileClick()
+                    },
+                    onRefresh = { ytMusicHomeViewModel.load() }
+                )
+            }
+
+            // Quick Picks: hidden entirely when empty (never an empty box).
+            if (feedState.isLoading && feedState.quickPicks.isEmpty()) {
+                item {
+                    YtSectionHeader(title = "Quick picks")
+                    Spacer(modifier = Modifier.height(12.dp))
+                    YtLoadingRow()
                 }
-            )
-        }
-
-        if (uiState.isLoading) {
-            item {
-                LoadingSkeleton()
-            }
-        } else {
-            item {
-                RecentlyPlayedSection(
-                    items = uiState.recentlyPlayed,
-                    onSongSelect = onSongSelect,
-                    onSongSelectWithContext = onSongSelectWithContext,
-                    onSeeAllClick = { onPlaylistClick(Collection.RECENTLY_PLAYED.slug) }
-                )
-            }
-
-            item {
-                QuickActionsRow(
-                    actions = uiState.quickActions,
-                    // Was a bare haptic tick with no navigation, so the Daily Mix chips were
-                    // buttons that buzzed and did nothing. Each chip now carries its Collection
-                    // slug and opens that collection.
-                    onActionClick = { action ->
-                        view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
-                        onPlaylistClick(action.id)
+            } else if (feedState.quickPicks.isNotEmpty()) {
+                item {
+                    YtSectionHeader(
+                        title = "Quick picks",
+                        onSeeAllClick = {
+                            feedState.quickPicks.firstOrNull()?.let {
+                                onSongSelectWithContext(it, feedState.quickPicks)
+                            }
+                        },
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+                    YtHorizontalScrollSection(items = feedState.quickPicks) { song ->
+                        YtQuickPickCard(song = song, onClick = {
+                            onSongSelectWithContext(song, feedState.quickPicks)
+                        })
                     }
-                )
+                }
             }
 
-            item {
-                RecommendedSection(
-                    items = uiState.recommended,
-                    onSongSelect = onSongSelect,
-                    onSongSelectWithContext = onSongSelectWithContext,
-                    onDismiss = { index ->
-                        homeViewModel.dismissRecommendation(index)
-                        view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
-                    },
-                    onRefresh = {
-                        homeViewModel.refreshRecommendations()
-                        view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
-                    },
-                    onSeeAllClick = { onPlaylistClick(Collection.RECOMMENDED.slug) }
-                )
+            // Mixed for you -------------------------------------------------
+            if (feedState.isLoading && feedState.mixes.isEmpty()) {
+                item {
+                    YtSectionHeader(title = "Mixed for you")
+                    Spacer(modifier = Modifier.height(12.dp))
+                    YtLoadingRow(cardWidth = 160, cardHeight = 160)
+                }
+            } else if (feedState.mixes.isNotEmpty()) {
+                item {
+                    YtSectionHeader(title = "Mixed for you")
+                    Spacer(modifier = Modifier.height(12.dp))
+                    YtHorizontalScrollSection(items = feedState.mixes) { mix ->
+                        YtMixCard(mix = mix, onClick = { onPlaylistClick(mix.id) })
+                    }
+                }
             }
 
-            item {
-                TrendingSection(
-                    items = uiState.trending,
-                    onSongSelect = onSongSelect,
-                    onSongSelectWithContext = onSongSelectWithContext,
-                    onSeeAllClick = { onPlaylistClick(Collection.TRENDING.slug) }
-                )
+            // Recommended albums --------------------------------------------
+            if (feedState.isLoading && feedState.recommendedAlbums.isEmpty()) {
+                item {
+                    YtSectionHeader(title = "Recommended albums")
+                    Spacer(modifier = Modifier.height(12.dp))
+                    YtLoadingRow(cardWidth = 140, cardHeight = 140)
+                }
+            } else if (feedState.recommendedAlbums.isNotEmpty()) {
+                item {
+                    YtSectionHeader(title = "Recommended albums")
+                    Spacer(modifier = Modifier.height(12.dp))
+                    YtHorizontalScrollSection(items = feedState.recommendedAlbums) { album ->
+                        YtAlbumCard(album = album, onClick = { onAlbumClick(album) })
+                    }
+                }
             }
 
-            item {
-                MadeForYouSection(
-                    playlists = uiState.madeForYou,
-                    onPlaylistClick = { playlistId ->
-                        onPlaylistClick(playlistId)
-                    },
-                    onSeeAllClick = { onPlaylistClick(Collection.DISCOVER_WEEKLY.slug) }
-                )
+            // From your library (before similar artists, per YT order) ------
+            if (feedState.libraryPicks.isNotEmpty()) {
+                item {
+                    YtSectionHeader(title = "Quick picks from your library")
+                    Spacer(modifier = Modifier.height(12.dp))
+                    YtHorizontalScrollSection(items = feedState.libraryPicks) { song ->
+                        YtLibraryPickCard(song = song, onClick = {
+                            onSongSelectWithContext(song, feedState.libraryPicks)
+                        })
+                    }
+                }
+            }
+
+            // Similar artists -----------------------------------------------
+            if (feedState.similarArtists.isNotEmpty()) {
+                item {
+                    YtSectionHeader(title = "Similar to artists you like")
+                    Spacer(modifier = Modifier.height(12.dp))
+                    YtHorizontalScrollSection(items = feedState.similarArtists) { artist ->
+                        YtArtistCard(artist = artist, onClick = { onArtistClick(artist.name) })
+                    }
+                }
+            }
+
+            // New releases ----------------------------------------------------
+            if (feedState.isLoading && feedState.newReleases.isEmpty()) {
+                item {
+                    YtSectionHeader(title = "New releases for you")
+                    Spacer(modifier = Modifier.height(12.dp))
+                    YtLoadingRow(cardWidth = 140, cardHeight = 140)
+                }
+            } else if (feedState.newReleases.isNotEmpty()) {
+                item {
+                    YtSectionHeader(title = "New releases for you")
+                    Spacer(modifier = Modifier.height(12.dp))
+                    YtHorizontalScrollSection(items = feedState.newReleases) { song ->
+                        YtQuickPickCard(song = song, onClick = {
+                            onSongSelectWithContext(song, feedState.newReleases)
+                        })
+                    }
+                }
+            }
+
+            // Recommended playlists -------------------------------------------
+            if (feedState.recommendedPlaylists.isNotEmpty()) {
+                item {
+                    YtSectionHeader(title = "Recommended playlists")
+                    Spacer(modifier = Modifier.height(12.dp))
+                    YtHorizontalScrollSection(items = feedState.recommendedPlaylists) { mix ->
+                        YtMixCard(mix = mix, onClick = { onPlaylistClick(mix.id) })
+                    }
+                }
+            }
+
+            // Recap -------------------------------------------------------------
+            feedState.recap?.let { recap ->
+                item {
+                    YtSectionHeader(title = "Your recap")
+                    Spacer(modifier = Modifier.height(12.dp))
+                    HomeRecapCard(
+                        recap = recap,
+                        onPlay = { song -> onSongSelectWithContext(song, recap.topSongs) }
+                    )
+                }
+            }
+
+            // Mood & genres: 2-column gradient grid ---------------------------
+            if (feedState.moods.isNotEmpty()) {
+                item {
+                    YtSectionHeader(title = "Moods & genres")
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = CrankSpacing.M),
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        feedState.moods.chunked(2).forEach { row ->
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            ) {
+                                row.forEach { mood ->
+                                    YtMoodTile(
+                                        category = mood,
+                                        onClick = { onPlaylistClick(mood.collectionSlug) },
+                                        modifier = Modifier.weight(1f),
+                                    )
+                                }
+                                // Keep tiles half-width on an odd last row.
+                                if (row.size == 1) Spacer(modifier = Modifier.weight(1f))
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Continue listening: genuine saved progress only ------------------
+            if (feedState.continueListening.isNotEmpty()) {
+                item {
+                    YtSectionHeader(title = "Continue listening")
+                    Spacer(modifier = Modifier.height(12.dp))
+                    YtHorizontalScrollSection(items = feedState.continueListening) { song ->
+                        YtContinueCard(
+                            song = song,
+                            progress = feedState.resumeProgress[song.id],
+                            onClick = {
+                                onSongSelectWithContext(song, feedState.continueListening)
+                            }
+                        )
+                    }
+                }
+            }
+
+            // Trending: chart order = backend result order, ranks are real ------
+            if (feedState.isLoading && feedState.trending.isEmpty()) {
+                item {
+                    YtSectionHeader(title = "Trending")
+                    Spacer(modifier = Modifier.height(12.dp))
+                    YtLoadingRow(cardWidth = 280, cardHeight = 64)
+                }
+            } else if (feedState.trending.isNotEmpty()) {
+                item {
+                    YtSectionHeader(title = "Trending")
+                    Spacer(modifier = Modifier.height(12.dp))
+                    YtHorizontalScrollSection(items = feedState.trending) { entry ->
+                        YtTrendingCard(entry = entry, onClick = {
+                            onSongSelectWithContext(
+                                entry.song,
+                                feedState.trending.map { it.song }
+                            )
+                        })
+                    }
+                }
+            }
+
+            // Error / retry -------------------------------------------------------------
+            feedState.errorMessage?.let { message ->
+                item {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = CrankSpacing.M),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                    ) {
+                        Text(
+                            text = message,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Button(onClick = {
+                            ytMusicHomeViewModel.dismissError()
+                            ytMusicHomeViewModel.load()
+                        }) {
+                            Text("Retry")
+                        }
+                    }
+                }
             }
         }
     }
 }
 
+/** YouTube Music home header: title left; search, bell, profile right. */
 @Composable
-private fun GreetingHeader(
-    greeting: String,
+private fun YtHomeHeader(
     notificationCount: Int,
+    onSearchClick: () -> Unit,
     onNotificationClick: () -> Unit,
-    onProfileClick: () -> Unit
+    onProfileClick: () -> Unit,
+    onRefresh: () -> Unit,
 ) {
-    Column(
+    Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(start = 20.dp, end = 12.dp, top = 20.dp, bottom = 8.dp)
+            .padding(start = 20.dp, end = 12.dp, top = 16.dp, bottom = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        // Actions sit above the title, which is the whole point of this arrangement: a greeting
-        // is not the most important thing on the screen, so it does not get the top line. It also
-        // stops the header from being a row of two unrelated controls with a title sandwiched
-        // between them, which is what the previous left-avatar/right-bell layout produced.
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.End,
-            verticalAlignment = Alignment.CenterVertically
+        Text(
+            text = "Home",
+            style = MaterialTheme.typography.headlineLarge.copy(fontWeight = FontWeight.Bold),
+            color = MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.weight(1f),
+        )
+
+        IconButton(
+            onClick = onSearchClick,
+            modifier = Modifier.size(40.dp)
         ) {
+            Icon(
+                imageVector = Icons.Default.Search,
+                contentDescription = "Search",
+                tint = MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.size(22.dp)
+            )
+        }
+
+        Box {
             IconButton(
                 onClick = onNotificationClick,
                 modifier = Modifier.size(40.dp)
@@ -221,29 +387,11 @@ private fun GreetingHeader(
                     modifier = Modifier.size(22.dp)
                 )
             }
-
-            Spacer(modifier = Modifier.width(4.dp))
-
-            // Opens Settings. This was the avatar for the removed You tab; with that hub gone it
-            // is the only way into Settings, so it navigates straight there and is drawn as a
-            // plain glyph rather than a gold gradient disc, which read as a profile photo the app
-            // does not actually have.
-            IconButton(
-                onClick = onProfileClick,
-                modifier = Modifier.size(40.dp)
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Settings,
-                    contentDescription = "Settings",
-                    tint = MaterialTheme.colorScheme.onSurface,
-                    modifier = Modifier.size(22.dp)
-                )
-            }
-
             if (notificationCount > 0) {
                 Box(
                     modifier = Modifier
-                        .padding(end = 4.dp)
+                        .align(Alignment.TopEnd)
+                        .padding(top = 8.dp, end = 8.dp)
                         .size(7.dp)
                         .clip(CircleShape)
                         .background(MaterialTheme.colorScheme.primary)
@@ -251,607 +399,121 @@ private fun GreetingHeader(
             }
         }
 
-        Spacer(modifier = Modifier.height(4.dp))
-
-        Text(
-            text = greeting,
-            style = MaterialTheme.typography.headlineLarge.copy(fontWeight = FontWeight.Bold),
-            color = MaterialTheme.colorScheme.onSurface
-        )
-    }
-}
-
-@Composable
-private fun RecentlyPlayedSection(
-    items: List<com.crank.music.ui.viewmodel.RecentlyPlayedItem>,
-    onSongSelect: (Song) -> Unit,
-    onSongSelectWithContext: (Song, List<Song>) -> Unit = { song, _ -> onSongSelect(song) },
-    onSeeAllClick: () -> Unit = {}
-) {
-    Column(modifier = Modifier.padding(top = 8.dp)) {
-        SectionHeaderRow(title = "Recently Played", onSeeAllClick = onSeeAllClick)
-
-        LazyRow(
-            contentPadding = PaddingValues(horizontal = 20.dp),
-            horizontalArrangement = Arrangement.spacedBy(14.dp)
-        ) {
-            itemsIndexed(items) { index, item ->
-                StaggeredFadeIn(index = index, visible = true) {
-                    RecentlyPlayedCard(
-                        item = item,
-                        onClick = {
-                            val contextList = items.map { it.song }
-                            onSongSelectWithContext(item.song, contextList)
-                        }
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun RecentlyPlayedCard(
-    item: com.crank.music.ui.viewmodel.RecentlyPlayedItem,
-    onClick: () -> Unit
-) {
-    var isPressed by remember { mutableStateOf(false) }
-    val scale by animateFloatAsState(
-        targetValue = if (isPressed) 0.96f else 1f,
-        animationSpec = spring(
-            dampingRatio = Spring.DampingRatioMediumBouncy,
-            stiffness = Spring.StiffnessHigh
-        ),
-        label = "scale"
-    )
-
-    Column(
-        modifier = Modifier
-            .width(156.dp)
-            .graphicsLayer {
-                scaleX = scale
-                scaleY = scale
-            }
-            .pointerInput(Unit) {
-                detectVerticalDragGestures(
-                    onDragStart = { isPressed = true },
-                    onDragEnd = { isPressed = false },
-                    onDragCancel = { isPressed = false },
-                    onVerticalDrag = { _, _ -> }
-                )
-            }
-            .clickable { onClick() }
-    ) {
-        // The heavy 8dp shadow and the charcoal backing plate are gone. A card is a picture of
-        // an album; giving the picture a drop shadow and a coloured mount makes it look like a
-        // framed object rather than a cover. The artwork now sits directly on the page at a
-        // larger size, which is what gives a music grid its density.
+        // Profile disc. There is no avatar backend, so a person glyph stands
+        // in — and it keeps its job: the only route into Settings.
         Surface(
+            onClick = onProfileClick,
+            shape = CircleShape,
+            color = MaterialTheme.colorScheme.surfaceVariant,
             modifier = Modifier
-                .size(156.dp),
-            shape = RoundedCornerShape(10.dp),
-            color = MaterialTheme.colorScheme.surfaceVariant
+                .padding(start = 4.dp)
+                .size(34.dp),
         ) {
-            Box {
-                AsyncImage(
-                    model = item.song.artworkUrl,
-                    contentDescription = item.song.title,
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize()
+            Box(contentAlignment = Alignment.Center) {
+                Icon(
+                    imageVector = Icons.Default.Person,
+                    contentDescription = "Profile",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(20.dp)
                 )
-
-                // Press feedback is a scrim plus a small play affordance, not a full-size gold
-                // disc. The disc covered most of the cover at this card size.
-                if (isPressed) {
-                    Surface(
-                        modifier = Modifier.fillMaxSize(),
-                        color = Color.Black.copy(alpha = 0.35f)
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Surface(
-                                modifier = Modifier.size(40.dp),
-                                shape = CircleShape,
-                                color = MaterialTheme.colorScheme.primary
-                            ) {
-                                Box(contentAlignment = Alignment.Center) {
-                                    Icon(
-                                        imageVector = Icons.Default.PlayArrow,
-                                        contentDescription = "Play",
-                                        tint = MaterialTheme.colorScheme.onPrimary,
-                                        modifier = Modifier.size(22.dp)
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
             }
         }
 
-        Spacer(modifier = Modifier.height(10.dp))
-
-        Text(
-            text = item.song.title,
-            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
-            color = MaterialTheme.colorScheme.onSurface,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis
-        )
-        Text(
-            text = item.lastPlayedText,
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis
-        )
-    }
-}
-
-@Composable
-private fun QuickActionsRow(
-    actions: List<com.crank.music.ui.viewmodel.HomeQuickAction>,
-    onActionClick: (com.crank.music.ui.viewmodel.HomeQuickAction) -> Unit
-) {
-    Column(modifier = Modifier.padding(top = 20.dp)) {
-        LazyRow(
-            contentPadding = PaddingValues(horizontal = 20.dp),
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        IconButton(
+            onClick = onRefresh,
+            modifier = Modifier.size(40.dp)
         ) {
-            items(actions) { action ->
-                QuickActionChip(
-                    action = action,
-                    onClick = { onActionClick(action) }
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun QuickActionChip(
-    action: com.crank.music.ui.viewmodel.HomeQuickAction,
-    onClick: () -> Unit
-) {
-    val gradientColors = when (action.icon) {
-        "mix" -> listOf(Color(0xFF6B3FA0), Color(0xFF9B59B6))
-        "repeat" -> listOf(Color(0xFF1E3264), Color(0xFF3498DB))
-        "time" -> listOf(Color(0xFFE13300), Color(0xFFE74C3C))
-        "discover" -> listOf(Color(0xFF1DB954), Color(0xFF2ECC71))
-        else -> listOf(MaterialTheme.colorScheme.primary, MaterialTheme.colorScheme.primaryContainer)
-    }
-
-    Surface(
-        modifier = Modifier
-            .clip(RoundedCornerShape(20.dp))
-            .clickable { onClick() },
-        shape = RoundedCornerShape(20.dp),
-        color = Color.Transparent
-    ) {
-        Box(
-            modifier = Modifier
-                .background(
-                    Brush.horizontalGradient(gradientColors)
-                )
-                .padding(horizontal = 16.dp, vertical = 10.dp)
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                val icon = when (action.icon) {
-                    "mix" -> "🎵"
-                    "repeat" -> "🔁"
-                    "time" -> "⏳"
-                    "discover" -> "🔍"
-                    else -> "🎶"
-                }
-                Text(
-                    text = icon,
-                    fontSize = 16.sp
-                )
-                Spacer(modifier = Modifier.width(6.dp))
-                Text(
-                    text = action.label,
-                    style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Medium),
-                    color = MaterialTheme.colorScheme.onSurface
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun RecommendedSection(
-    items: List<com.crank.music.ui.viewmodel.RecommendedItem>,
-    onSongSelect: (Song) -> Unit,
-    onSongSelectWithContext: (Song, List<Song>) -> Unit = { song, _ -> onSongSelect(song) },
-    onDismiss: (Int) -> Unit,
-    onRefresh: () -> Unit,
-    onSeeAllClick: () -> Unit = {}
-) {
-    Column(modifier = Modifier.padding(top = 24.dp)) {
-        SectionHeaderRow(
-            title = "Recommended For You",
-            showRefresh = true,
-            onRefresh = onRefresh,
-            onSeeAllClick = onSeeAllClick
-        )
-
-        LazyRow(
-            contentPadding = PaddingValues(horizontal = 20.dp),
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            itemsIndexed(items) { index, item ->
-                RecommendedCard(
-                    item = item,
-                    onClick = {
-                        val contextList = items.map { it.song }
-                        onSongSelectWithContext(item.song, contextList)
-                    },
-                    onDismiss = { onDismiss(index) }
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun RecommendedCard(
-    item: com.crank.music.ui.viewmodel.RecommendedItem,
-    onClick: () -> Unit,
-    onDismiss: () -> Unit
-) {
-    Column(
-        modifier = Modifier.width(160.dp)
-    ) {
-        Surface(
-            modifier = Modifier.size(160.dp),
-            shape = RoundedCornerShape(10.dp),
-            color = MaterialTheme.colorScheme.surfaceVariant
-        ) {
-            Box {
-                AsyncImage(
-                    model = item.song.artworkUrl,
-                    contentDescription = item.song.title,
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize()
-                )
-
-                // The touch target and the painted circle are deliberately separated.
-                //
-                // They used to be the same node: `IconButton(...).size(24.dp).background(...)`.
-                // IconButton enforces Material's 48dp minimum interactive size, so the modifier
-                // did not shrink the button — it only shrank the layout slot — and the background
-                // was painted across the full 48dp target. On screen that produced a ~33dp black
-                // disc bleeding over the artwork's top-right corner instead of the intended 24dp
-                // dot. Keeping the 48dp target for accessibility and painting a fixed-size circle
-                // inside it is what makes the drawn size match the intended size.
-                IconButton(
-                    onClick = onDismiss,
-                    modifier = Modifier.align(Alignment.TopEnd)
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(26.dp)
-                            .background(Color.Black.copy(alpha = 0.45f), CircleShape),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Close,
-                            contentDescription = "Dismiss",
-                            tint = Color.White,
-                            modifier = Modifier.size(14.dp)
-                        )
-                    }
-                }
-
-                Surface(
-                    modifier = Modifier
-                        .align(Alignment.BottomStart)
-                        .padding(8.dp),
-                    color = Color.Black.copy(alpha = 0.65f),
-                    shape = RoundedCornerShape(6.dp)
-                ) {
-                    Text(
-                        text = item.reason,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = Color.White,
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
-            }
-        }
-
-        Spacer(modifier = Modifier.height(6.dp))
-
-        Text(
-            text = item.song.title,
-            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
-            color = MaterialTheme.colorScheme.onSurface,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis
-        )
-        Text(
-            text = item.song.artistName,
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis
-        )
-    }
-}
-
-@Composable
-private fun TrendingSection(
-    items: List<com.crank.music.ui.viewmodel.TrendingItem>,
-    onSongSelect: (Song) -> Unit,
-    onSongSelectWithContext: (Song, List<Song>) -> Unit = { song, _ -> onSongSelect(song) },
-    onSeeAllClick: () -> Unit = {}
-) {
-    Column(modifier = Modifier.padding(top = 24.dp)) {
-        SectionHeaderRow(title = "Trending Now", onSeeAllClick = onSeeAllClick)
-
-        Column(
-            modifier = Modifier.padding(horizontal = 20.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp)
-        ) {
-            items.forEach { item ->
-                TrendingRow(
-                    item = item,
-                    onClick = {
-                        val contextList = items.map { it.song }
-                        onSongSelectWithContext(item.song, contextList)
-                    }
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun TrendingRow(
-    item: com.crank.music.ui.viewmodel.TrendingItem,
-    onClick: () -> Unit
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(10.dp))
-            .clickable { onClick() }
-            .padding(8.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Text(
-            text = "${item.rank}",
-            style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
-            color = if (item.rank <= 3) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.width(30.dp),
-            textAlign = TextAlign.Center
-        )
-
-        Spacer(modifier = Modifier.width(8.dp))
-
-        Surface(
-            modifier = Modifier.size(48.dp),
-            shape = RoundedCornerShape(6.dp),
-            color = MaterialTheme.colorScheme.surfaceVariant
-        ) {
-            AsyncImage(
-                model = item.song.artworkUrl,
-                contentDescription = null,
-                contentScale = ContentScale.Crop,
-                modifier = Modifier.fillMaxSize()
-            )
-        }
-
-        Spacer(modifier = Modifier.width(12.dp))
-
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = item.song.title,
-                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
-                color = MaterialTheme.colorScheme.onSurface,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-            Text(
-                text = item.song.artistName,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-        }
-
-        // Only show a direction arrow when we actually know the direction. The previous `else`
-        // branch drew an upward arrow for unknown data, which asserted movement the backend never
-        // reported. An empty string now renders nothing.
-        if (item.trend.isNotEmpty()) {
             Icon(
-                imageVector = when (item.trend) {
-                    "down" -> Icons.AutoMirrored.Filled.TrendingDown
-                    else -> Icons.AutoMirrored.Filled.TrendingUp
-                },
-                contentDescription = null,
-                tint = when (item.trend) {
-                    "up" -> Color(0xFF4CAF50)
-                    "down" -> Color(0xFFFF5252)
-                    else -> MaterialTheme.colorScheme.onSurfaceVariant
-                },
-                modifier = Modifier.size(18.dp)
+                imageVector = Icons.Default.Refresh,
+                contentDescription = "Refresh",
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(22.dp)
             )
         }
     }
 }
 
 @Composable
-private fun MadeForYouSection(
-    playlists: List<com.crank.music.ui.viewmodel.MadeForYouPlaylist>,
-    onPlaylistClick: (String) -> Unit,
-    onSeeAllClick: () -> Unit = {}
+private fun HomeRecapCard(
+    recap: com.crank.music.feature.ytmusic.YtRecap,
+    onPlay: (Song) -> Unit,
 ) {
-    Column(modifier = Modifier.padding(top = 24.dp)) {
-        SectionHeaderRow(title = "Made For You", onSeeAllClick = onSeeAllClick)
-
-        LazyRow(
-            contentPadding = PaddingValues(horizontal = 20.dp),
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            items(playlists) { playlist ->
-                MadeForYouCard(
-                    playlist = playlist,
-                    onClick = { onPlaylistClick(playlist.id) }
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun MadeForYouCard(
-    playlist: com.crank.music.ui.viewmodel.MadeForYouPlaylist,
-    onClick: () -> Unit
-) {
-    Column(
-        modifier = Modifier
-            .width(150.dp)
-            .clickable { onClick() }
-    ) {
-        Surface(
-            modifier = Modifier
-                .size(150.dp)
-                .shadow(6.dp, RoundedCornerShape(12.dp)),
-            shape = RoundedCornerShape(12.dp),
-            color = Color(playlist.artworkColor)
-        ) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(
-                        Brush.linearGradient(
-                            colors = listOf(
-                                Color(playlist.artworkColor),
-                                Color(playlist.artworkColor).copy(alpha = 0.7f)
-                            )
-                        )
-                    ),
-                contentAlignment = Alignment.Center
-            ) {
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    modifier = Modifier.padding(12.dp)
-                ) {
-                    Text(
-                        text = when (playlist.id) {
-                            "1" -> "🔍"
-                            "2" -> "📡"
-                            "3" -> "🎵"
-                            "4" -> "⏳"
-                            "5" -> "🔁"
-                            "6" -> "⏪"
-                            else -> "🎶"
-                        },
-                        fontSize = 32.sp
-                    )
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        text = playlist.title,
-                        style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Medium),
-                        color = MaterialTheme.colorScheme.onSurface,
-                        textAlign = TextAlign.Center,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
-            }
-        }
-
-        Spacer(modifier = Modifier.height(6.dp))
-
-        Text(
-            text = playlist.subtitle,
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis
-        )
-        Text(
-            text = playlist.lastUpdated,
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-            maxLines = 1
-        )
-    }
-}
-
-@Composable
-private fun SectionHeaderRow(
-    title: String,
-    showRefresh: Boolean = false,
-    onRefresh: (() -> Unit)? = null,
-    onSeeAllClick: (() -> Unit)? = null
-) {
-    Row(
+    androidx.compose.material3.Surface(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(start = 20.dp, end = 12.dp, top = 24.dp, bottom = 10.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.Bottom
+            .padding(horizontal = CrankSpacing.M),
+        shape = androidx.compose.foundation.shape.RoundedCornerShape(
+            com.crank.music.ui.theme.CrankRadius.Large
+        ),
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        tonalElevation = 2.dp,
+        shadowElevation = 3.dp,
     ) {
-        Text(
-            text = title,
-            style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold),
-            color = MaterialTheme.colorScheme.onSurface
-        )
-
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            // "See All" is secondary to the section title, so it is set in the muted colour at
-            // label size rather than in the accent. An accent-coloured "See All" on every row
-            // meant six competing calls to action per screen, which is what made the home feed
-            // feel busy despite being mostly empty space.
+        Column(modifier = Modifier.padding(16.dp)) {
             Text(
-                text = "See All",
-                style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier
-                    .clip(RoundedCornerShape(8.dp))
-                    .clickable { onSeeAllClick?.invoke() }
-                    .padding(horizontal = 8.dp, vertical = 6.dp)
+                text = "Your year in review",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurface,
             )
-
-            if (showRefresh && onRefresh != null) {
-                IconButton(
-                    onClick = onRefresh,
-                    modifier = Modifier.size(32.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Refresh,
-                        contentDescription = "Refresh",
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(18.dp)
-                    )
-                }
+            Spacer(modifier = Modifier.height(4.dp))
+            val summary = buildString {
+                append(recap.historyCount)
+                append(" plays")
+                if (recap.topArtist.isNotBlank()) append(" • Top artist: ${recap.topArtist}")
+                if (recap.totalMinutes > 0) append(" • ${recap.totalMinutes.toInt()} min")
+            }
+            Text(
+                text = summary,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+            recap.topSongs.take(5).forEachIndexed { index, song ->
+                HomeRecapRow(rank = index + 1, song = song, onClick = { onPlay(song) })
             }
         }
     }
 }
 
 @Composable
-private fun LoadingSkeleton() {
-    Column(
-        modifier = Modifier.padding(horizontal = 20.dp),
-        verticalArrangement = Arrangement.spacedBy(20.dp)
+private fun HomeRecapRow(
+    rank: Int,
+    song: Song,
+    onClick: () -> Unit,
+) {
+    androidx.compose.material3.Surface(
+        onClick = onClick,
+        shape = androidx.compose.foundation.shape.RoundedCornerShape(
+            com.crank.music.ui.theme.CrankRadius.Medium
+        ),
+        color = MaterialTheme.colorScheme.surfaceVariant,
     ) {
-        repeat(3) {
-            // Neutral shimmer. A tinted shimmer on a card-shaped block reads as content rather
-            // than as absence, and it also committed the skeleton to a colour the real artwork
-            // would not match.
-            ShimmerBox(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(180.dp),
-                shimmerColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.06f),
-                baseColor = MaterialTheme.colorScheme.surfaceVariant
+        Box(modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
+            Text(
+                text = "$rank",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.padding(end = 12.dp).align(Alignment.CenterStart),
             )
+            Column(modifier = Modifier.padding(start = 32.dp)) {
+                Text(
+                    text = song.title,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    text = song.artistName,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
         }
     }
 }

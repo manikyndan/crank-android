@@ -7,9 +7,12 @@ import androidx.media3.common.C
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.datasource.HttpDataSource
+import androidx.media3.datasource.cache.Cache
+import androidx.media3.datasource.cache.CacheDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.session.MediaSession
+import com.crank.music.service.CrankSessionCallback
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -46,10 +49,18 @@ object PlayerModule {
     fun provideExoPlayer(
         @ApplicationContext context: Context,
         audioAttributes: AudioAttributes,
-        httpDataSourceFactory: HttpDataSource.Factory
+        httpDataSourceFactory: HttpDataSource.Factory,
+        downloadCache: Cache
     ): ExoPlayer {
+        // Read completed downloads from the shared download cache so tapped
+        // downloads play offline. The null write sink means playback never
+        // writes to the cache — streaming behavior is otherwise unchanged.
+        val cacheDataSourceFactory = CacheDataSource.Factory()
+            .setCache(downloadCache)
+            .setUpstreamDataSourceFactory(httpDataSourceFactory)
+            .setCacheWriteDataSinkFactory(null)
         val mediaSourceFactory = DefaultMediaSourceFactory(context)
-            .setDataSourceFactory(httpDataSourceFactory)
+            .setDataSourceFactory(cacheDataSourceFactory)
 
         return ExoPlayer.Builder(context)
             .setAudioAttributes(audioAttributes, true)
@@ -65,6 +76,7 @@ object PlayerModule {
         player: ExoPlayer
     ): MediaSession {
         return MediaSession.Builder(context, player)
+            .setCallback(CrankSessionCallback)
             .build()
     }
 }

@@ -57,6 +57,11 @@ data class YtRecap(
     val historyCount: Int,
 )
 
+data class YtTrendingEntry(
+    val song: Song,
+    val rank: Int,
+)
+
 data class YtMusicHomeUiState(
     val isLoading: Boolean = true,
     val quickPicks: List<Song> = emptyList(),
@@ -67,6 +72,9 @@ data class YtMusicHomeUiState(
     val newReleases: List<Song> = emptyList(),
     val recommendedPlaylists: List<YtMix> = emptyList(),
     val continueListening: List<Song> = emptyList(),
+    /** Genuine saved progress per song id (0..1). Absent = unknown, never invented. */
+    val resumeProgress: Map<String, Float> = emptyMap(),
+    val trending: List<YtTrendingEntry> = emptyList(),
     val moods: List<YtMoodCategory> = emptyList(),
     val recap: YtRecap? = null,
     val errorMessage: String? = null,
@@ -131,6 +139,16 @@ class YtMusicHomeViewModel @Inject constructor(
                         runCatching { songDao.getTotalListeningMinutes() }.getOrDefault(0.0),
                         runCatching { songDao.getHistoryCount() }.getOrDefault(0),
                     )
+                }
+                // The single restorable playback position: the only genuine
+                // per-track progress the app persists. Shown on the matching
+                // continue-listening card; nothing is invented for other tracks.
+                val resumeDeferred = async(Dispatchers.IO) {
+                    runCatching {
+                        val saved = songDao.getPlaybackState() ?: return@runCatching emptyMap<String, Float>()
+                        if (saved.songDurationMs <= 0L || saved.positionMs <= 0L) return@runCatching emptyMap<String, Float>()
+                        mapOf(saved.songId to (saved.positionMs.toFloat() / saved.songDurationMs.toFloat()).coerceIn(0f, 1f))
+                    }.getOrDefault(emptyMap())
                 }
                 val albumsDeferred = async { runCatching { musicRepository.getHomeRecommendations() }.getOrDefault(emptyList()) }
                 val trendingDeferred = async { runCatching { musicRepository.search("top hits") }.getOrDefault(emptyList()) }
@@ -235,6 +253,13 @@ class YtMusicHomeViewModel @Inject constructor(
 
                 val newReleases = newReleasesDeferred.await().take(12)
                 val recommendedAlbums = albumsDeferred.await().take(12)
+                val resumeProgress = resumeDeferred.await()
+
+                // Trending: chart order is the backend's result order. No
+                // up/down indicators — the backend never reports movement.
+                val trendingEntries = trending.take(10).mapIndexed { index, song ->
+                    YtTrendingEntry(song = song, rank = index + 1)
+                }
 
                 val recap = if (historySongs.isNotEmpty()) {
                     YtRecap(
@@ -257,6 +282,8 @@ class YtMusicHomeViewModel @Inject constructor(
                     newReleases = newReleases,
                     recommendedPlaylists = recommendedPlaylists,
                     continueListening = continueListening,
+                    resumeProgress = resumeProgress,
+                    trending = trendingEntries,
                     moods = STATIC_MOODS,
                     recap = recap,
                     errorMessage = null,

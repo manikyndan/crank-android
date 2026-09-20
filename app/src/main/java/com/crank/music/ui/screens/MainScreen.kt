@@ -23,7 +23,6 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.crank.music.domain.model.Album
 import com.crank.music.feature.recognition.RecognitionScreen
-import com.crank.music.feature.ytmusic.YtMusicHomeScreen
 import com.crank.music.ui.components.BottomNavigationBar
 import com.crank.music.ui.components.MiniPlayer
 import com.crank.music.ui.components.NavItem
@@ -68,7 +67,9 @@ fun MainScreen(
                             if (currentRoute != "now_playing") {
                                 navController.navigate("now_playing")
                             }
-                        }
+                        },
+                        onNextClick = { playerViewModel.playNext() },
+                        onPreviousClick = { playerViewModel.playPrevious() }
                     )
                     BottomNavigationBar(
                         currentRoute = currentRoute,
@@ -113,6 +114,17 @@ fun MainScreen(
                         // equalizer, appearance, privacy, downloads and Music DNA. Pointed at the
                         // settings route directly rather than at a removed tab.
                         navController.navigate("settings")
+                    },
+                    onSearchClick = {
+                        navController.navigate(NavItem.Search.route) {
+                            popUpTo(NavItem.Home.route)
+                        }
+                    },
+                    onAlbumClick = { album ->
+                        navController.navigate(albumRoute(album))
+                    },
+                    onArtistClick = { artistName ->
+                        navController.navigate("artist_detail/${android.net.Uri.encode(artistName)}")
                     }
                 )
             }
@@ -125,35 +137,13 @@ fun MainScreen(
                         playerViewModel.playSongWithContext(selectedSong, contextList)
                     },
                     onArtistClick = { artistName ->
-                        navController.navigate("search?q=$artistName")
+                        navController.navigate("artist_detail/${android.net.Uri.encode(artistName)}")
                     },
                     onPlaylistClick = { collectionSlug ->
                         navController.navigate("playlist_detail/$collectionSlug")
                     },
                     onAlbumClick = { album ->
                         navController.navigate(albumRoute(album))
-                    }
-                )
-            }
-            // NEW additive destination: YouTube Music-style home feed.
-            // Existing routes above/below are untouched; this reuses the same
-            // PlayerViewModel callbacks and Collection-slug navigation contract.
-            composable(NavItem.Discover.route) {
-                YtMusicHomeScreen(
-                    onSongSelect = { selectedSong ->
-                        playerViewModel.playSong(selectedSong)
-                    },
-                    onSongSelectWithContext = { selectedSong, contextList ->
-                        playerViewModel.playSongWithContext(selectedSong, contextList)
-                    },
-                    onPlaylistClick = { collectionSlug ->
-                        navController.navigate("playlist_detail/$collectionSlug")
-                    },
-                    onAlbumClick = { album ->
-                        navController.navigate(albumRoute(album))
-                    },
-                    onArtistClick = { artistName ->
-                        navController.navigate("search?q=$artistName")
                     }
                 )
             }
@@ -314,7 +304,15 @@ fun MainScreen(
                     },
                     onBackClick = {
                         navController.popBackStack()
-                    }
+                    },
+                    onAlbumClick = { album ->
+                        navController.navigate(albumRoute(album))
+                    },
+                    onArtistClick = { artistName ->
+                        navController.navigate("artist_detail/${android.net.Uri.encode(artistName)}")
+                    },
+                    currentSongId = song?.id,
+                    isPlaying = playerState.isPlaying
                 )
             }
             composable("artist_detail/{artistId}") {
@@ -327,7 +325,12 @@ fun MainScreen(
                     },
                     onBackClick = {
                         navController.popBackStack()
-                    }
+                    },
+                    onAlbumClick = { album ->
+                        navController.navigate(albumRoute(album))
+                    },
+                    currentSongId = song?.id,
+                    isPlaying = playerState.isPlaying
                 )
             }
             // The You destination is removed with its tab. The routes it linked to — settings,
@@ -438,6 +441,9 @@ fun MainScreen(
                     },
                     onLyricsClick = {
                         navController.navigate("lyrics")
+                    },
+                    onArtistClick = { artistName ->
+                        navController.navigate("artist_detail/${android.net.Uri.encode(artistName)}")
                     }
                 )
             }

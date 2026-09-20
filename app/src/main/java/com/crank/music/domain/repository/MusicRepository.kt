@@ -2,6 +2,7 @@ package com.crank.music.domain.repository
 
 import com.crank.music.data.remote.StreamData
 import com.crank.music.domain.model.Album
+import com.crank.music.domain.model.AlbumWithKind
 import com.crank.music.domain.model.Song
 
 data class LyricsSearchResult(
@@ -26,6 +27,13 @@ interface MusicRepository {
      * the album screen.
      */
     suspend fun searchAlbums(query: String): List<Album>
+
+    /**
+     * Album cards with release kinds, for screens that split discographies
+     * (albums vs singles/EPs). Same backend call as [searchAlbums] with the
+     * kind attached; callers needing only albums should prefer that.
+     */
+    suspend fun searchAlbumsWithKind(query: String): List<AlbumWithKind>
     suspend fun getHomeRecommendations(): List<Album>
 
     /**

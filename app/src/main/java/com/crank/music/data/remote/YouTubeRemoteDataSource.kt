@@ -3,6 +3,7 @@ package com.crank.music.data.remote
 import android.util.Log
 import com.crank.music.data.remote.innertube.InnerTubeApi
 import com.crank.music.domain.model.Album
+import com.crank.music.domain.model.AlbumWithKind
 import com.crank.music.domain.model.Song
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -120,6 +121,26 @@ class YouTubeRemoteDataSource @Inject constructor(
                 Log.e("CRANK_INTEGRATION", e.message ?: "Fallback album search failed", e)
                 emptyList()
             }
+        }
+    }
+
+    override suspend fun searchAlbumsWithKind(query: String): List<AlbumWithKind> {
+        if (query.isBlank()) return emptyList()
+
+        return try {
+            val results = innerTubeApi.searchAlbumsWithKind(query)
+            if (results.isNotEmpty()) {
+                results
+            } else {
+                // The NewPipe extractor reports no release kind, so fallback
+                // items land in the albums bucket rather than a guessed split.
+                searchAlbumsFallback(query).map { AlbumWithKind(album = it, kind = "") }
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Log.e("CRANK_INTEGRATION", e.message ?: "InnerTube album-kind search error, trying fallback", e)
+            searchAlbumsFallback(query).map { AlbumWithKind(album = it, kind = "") }
         }
     }
 

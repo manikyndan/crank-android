@@ -8,6 +8,7 @@ import com.crank.music.data.remote.StreamData
 import com.crank.music.data.remote.StreamResolver
 import com.crank.music.data.remote.innertube.InnerTubeApi
 import com.crank.music.domain.model.Album
+import com.crank.music.domain.model.AlbumWithKind
 import com.crank.music.domain.model.Song
 import com.crank.music.domain.repository.LyricsSearchResult
 import com.crank.music.domain.repository.MusicRepository
@@ -35,6 +36,7 @@ class MusicRepositoryImpl @Inject constructor(
     // earlier.
     private val searchCache = TtlCache<List<Song>>(ttlMillis = 2 * 60 * 1000L)
     private val albumSearchCache = TtlCache<List<Album>>(ttlMillis = 2 * 60 * 1000L)
+    private val albumKindCache = TtlCache<List<AlbumWithKind>>(ttlMillis = 2 * 60 * 1000L)
     private val homeCache = TtlCache<List<Album>>(ttlMillis = 10 * 60 * 1000L)
     private val browseCache = TtlCache<List<Song>>(ttlMillis = 30 * 60 * 1000L)
 
@@ -102,6 +104,31 @@ class MusicRepositoryImpl @Inject constructor(
 
         // 4. No local album index exists, so an honest empty answer — never a
         //    synthesised "Single" card. The UI already renders an empty state.
+        return emptyList()
+    }
+
+    override suspend fun searchAlbumsWithKind(query: String): List<AlbumWithKind> {
+        if (query.isBlank()) return emptyList()
+        val key = "albumskind:$query"
+
+        albumKindCache.get(key)?.let { return it }
+
+        val remoteResults = try {
+            retryWithBackoff(maxAttempts = 2) { remoteDataSource.searchAlbumsWithKind(query) }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Log.e("CRANK_INTEGRATION", "Album-kind search failed after retries: ${e.message}", e)
+            null
+        }
+
+        if (remoteResults != null) {
+            albumKindCache.put(key, remoteResults)
+            return remoteResults
+        }
+
+        albumKindCache.get(key, allowStale = true)?.let { return it }
+
         return emptyList()
     }
 

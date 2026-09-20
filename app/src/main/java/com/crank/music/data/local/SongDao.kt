@@ -74,6 +74,19 @@ interface SongDao {
     @Query("SELECT * FROM playlists ORDER BY createdAt DESC")
     suspend fun getPlaylists(): List<PlaylistEntity>
 
+    @Query("SELECT * FROM playlists WHERE id = :playlistId")
+    suspend fun getPlaylistById(playlistId: String): PlaylistEntity?
+
+    // ── User playlist membership ────────────────────────────────────────────
+    // PlaylistSongCrossRef has existed since v4 with no DAO path; these read
+    // and write it. No migration: no table changes, only new queries.
+
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertPlaylistSong(ref: PlaylistSongCrossRef)
+
+    @Query("SELECT songId FROM playlist_song_cross_ref WHERE playlistId = :playlistId ORDER BY songOrder ASC")
+    suspend fun getSongIdsForPlaylist(playlistId: String): List<String>
+
     @Query("DELETE FROM playlists WHERE id = :playlistId")
     suspend fun deletePlaylist(playlistId: String)
 

@@ -15,17 +15,23 @@ import androidx.media3.exoplayer.ExoPlayer
 import com.crank.music.data.local.HistoryEntity
 import com.crank.music.data.local.QueueItemEntity
 import com.crank.music.data.local.SongDao
+import com.crank.music.data.local.toEntity
 import com.crank.music.data.remote.StreamResolver
 import com.crank.music.domain.model.DownloadState
+import com.crank.music.domain.model.DownloadStateResolver
 import com.crank.music.domain.model.Song
 import com.crank.music.domain.repository.DownloadRepository
 import com.crank.music.domain.repository.MusicRepository
+import com.crank.music.service.RemoteControlBridge
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -105,6 +111,25 @@ class PlayerViewModel @Inject constructor(
 
     private val _currentSongDownloadState = MutableStateFlow(DownloadState.IDLE)
     val currentSongDownloadState: StateFlow<DownloadState> = _currentSongDownloadState.asStateFlow()
+
+    /**
+     * Live progress of the current song's download, as a fraction of the known total.
+     *
+     * **null means the total size is not known yet** — Media3 reports `contentLength = -1` until
+     * the server answers, which is the first moment of every transfer. The indicator renders
+     * that as an indeterminate sweep rather than a ring frozen at 0%, because a ring sitting at
+     * zero looks like a stall.
+     *
+     * Deliberately a separate flow from [currentSongDownloadState]. The state changes a handful
+     * of times across a whole download, while this moves continuously; publishing both through
+     * one flow would make each progress sample indistinguishable from a state change and force
+     * the UI to re-evaluate the state machine on every one of them.
+     */
+    private val _currentSongDownloadFraction = MutableStateFlow<Float?>(null)
+    val currentSongDownloadFraction: StateFlow<Float?> = _currentSongDownloadFraction.asStateFlow()
+
+    private val _isCurrentLiked = MutableStateFlow(false)
+    val isCurrentLiked: StateFlow<Boolean> = _isCurrentLiked.asStateFlow()
 
     private val playHistory = PlaybackHistory()
 
@@ -277,10 +302,18 @@ class PlayerViewModel @Inject constructor(
 
     init {
         player.addListener(playerListener)
+        // The session (built in PlayerModule) delegates OS transport here.
+        // playNext/playPrevious post work to viewModelScope and touch the
+        // thread-safe player, so binder-thread calls from the notification,
+        // lock screen or Bluetooth are fine.
+        RemoteControlBridge.onSkipToNext = { playNext() }
+        RemoteControlBridge.onSkipToPrevious = { playPrevious() }
         startProgressTracker()
         loadHistory()
         startPositionSaving()
         observeCurrentSongDownload()
+        observeCurrentSongDownloadProgress()
+        observeCurrentSongLiked()
         // restoreLastPlayback() owns the queue when a saved session exists; it
         // delegates to loadQueueFromRoom() otherwise. Running them concurrently
         // would let the two sources race for _queue.value.
@@ -345,7 +378,14 @@ class PlayerViewModel @Inject constructor(
                             MediaMetadata.Builder()
                                 .setTitle(savedSong.title)
                                 .setArtist(savedSong.artistName)
-                                .setAlbumTitle(savedSong.albumId)
+                                // The album id is often an opaque handle, not a name —
+                                // publishing it would print gibberish under the title
+                                // on the lock screen. Null omits the line instead.
+                                .setAlbumTitle(
+                                    savedSong.albumId?.takeIf {
+                                        it.isNotBlank() && !looksLikeOpaqueId(it)
+                                    }
+                                )
                                 .setArtworkUri(
                                     if (savedSong.artworkUrl.isNotBlank()) savedSong.artworkUrl.toUri() else null
                                 )
@@ -474,17 +514,189 @@ class PlayerViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Download state for the current song, under a strict rule:
+     *
+     * - tick: engine reports COMPLETED, or the database row says fully saved;
+     * - spinner: engine is actively working AND (tapped recently this session
+     *   OR bytes are provably on disk and growing);
+     * - arrow: everything else, including stale queued entries with zero
+     *   bytes (expired URL retry loops) and FAILED (tap retries fresh).
+     *
+     * A 4s poll re-resolves while the track is current so a stalled spinner
+     * decays back to the arrow instead of spinning forever. `collectLatest`
+     * restarts everything per track, so state can never stick to the
+     * previous song.
+     */
+    private val downloadTapTimes = mutableMapOf<String, Long>()
+    private val downloadLastBytes = mutableMapOf<String, Long>()
+
     private fun observeCurrentSongDownload() {
         viewModelScope.launch {
+            _playerState.map { it.currentSong?.id }
+                .distinctUntilChanged()
+                .collectLatest { songId ->
+                    if (songId == null) {
+                        _currentSongDownloadState.value = DownloadState.IDLE
+                        return@collectLatest
+                    }
+                    _currentSongDownloadState.value = resolveDownloadState(songId)
+                    kotlinx.coroutines.coroutineScope {
+                        launch {
+                            try {
+                                downloadRepository.getDownloadState(songId).collect {
+                                    _currentSongDownloadState.value =
+                                        resolveDownloadState(songId)
+                                }
+                            } catch (e: kotlinx.coroutines.CancellationException) {
+                                throw e
+                            } catch (e: Exception) {
+                                Log.e("CRANK_PLAYER", "Failed to observe download state: ${e.message}")
+                            }
+                        }
+                        launch {
+                            while (true) {
+                                kotlinx.coroutines.delay(4000)
+                                _currentSongDownloadState.value =
+                                    resolveDownloadState(songId)
+                            }
+                        }
+                    }
+                }
+        }
+    }
+
+    /**
+     * Publishes the current song's download fraction as it moves.
+     *
+     * Separate from [observeCurrentSongDownload] on purpose. That one owns the *state* and
+     * re-derives it on a 4s poll, which is the right cadence for a value that changes a few
+     * times per download. A progress ring needs the transfer's own cadence, so this subscribes
+     * to the engine's progress stream instead and never touches the state machine — the two
+     * cannot fight over the same flow.
+     *
+     * `collectLatest` keyed on the song id is what makes skipping safe: the previous song's
+     * collection is cancelled the instant the id changes, so its remaining ticks can never land
+     * on the new song. The fraction is also cleared before the new subscription starts, because
+     * leaving the old value in place for even one frame would show the new song already part
+     * downloaded.
+     */
+    private fun observeCurrentSongDownloadProgress() {
+        viewModelScope.launch {
+            _playerState.map { it.currentSong?.id }
+                .distinctUntilChanged()
+                .collectLatest { songId ->
+                    _currentSongDownloadFraction.value = null
+                    if (songId == null) return@collectLatest
+                    try {
+                        downloadRepository.getDownloadProgress(songId).collect { progress ->
+                            // The rule for what these numbers mean lives on the model, so this
+                            // stays a plain pass-through and both surfaces get the same answer.
+                            _currentSongDownloadFraction.value = progress?.uiFraction
+                        }
+                    } catch (e: kotlinx.coroutines.CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        Log.e("CRANK_PLAYER", "Failed to observe download progress: ${e.message}")
+                    }
+                }
+        }
+    }
+
+    /**
+     * Reads the two sources of truth and hands the decision to [DownloadStateResolver].
+     *
+     * This method's only job now is the I/O: fetch the engine snapshot and the library row,
+     * then record the byte count for the next pass. The precedence rules — in particular that
+     * a song already on disk always reports COMPLETED — live in the resolver, where they are
+     * covered by unit tests instead of being re-derived here by eye.
+     */
+    private suspend fun resolveDownloadState(songId: String): DownloadState {
+        return try {
+            val snapshot = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                downloadRepository.getDownloadSnapshot(songId)
+            }
+            // The durable flag. `markComplete` is the only writer that sets this true, and it
+            // runs when the bytes are fully on disk; a fresh download resets it to false. So a
+            // true here means "downloaded", not "requested" — see the note in DownloadRepositoryImpl.
+            val savedLocal = try {
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    songDao.getSongById(songId)?.isLocal == true
+                }
+            } catch (e: Exception) {
+                false
+            }
+
+            val tappedAt = downloadTapTimes[songId] ?: 0L
+            val tappedFresh = System.currentTimeMillis() - tappedAt < TAP_FRESH_WINDOW_MS
+
+            // Read the previous count before overwriting it, so the resolver can tell a moving
+            // transfer from one stalled on stale bytes.
+            val previousBytes = downloadLastBytes[songId]
+            snapshot?.let { downloadLastBytes[songId] = it.downloadedBytes }
+
+            DownloadStateResolver.resolve(
+                managerState = snapshot?.state,
+                downloadedOnDisk = savedLocal,
+                engineTransferring = snapshot?.isTransferring == true,
+                tappedRecently = tappedFresh,
+                previousBytes = previousBytes,
+                currentBytes = snapshot?.downloadedBytes ?: 0L,
+            )
+        } catch (e: Exception) {
+            Log.e("CRANK_PLAYER", "Failed to resolve download state: ${e.message}")
+            DownloadState.IDLE
+        }
+    }
+
+    /**
+     * Tracks whether the current song is in Library → Liked Music.
+     *
+     * Read per track change (not as a Flow) because likes are toggled from
+     * several screens; a stale cached value would show the wrong heart.
+     * [toggleLikeCurrentSong] refreshes it after every write.
+     */
+    private fun observeCurrentSongLiked() {
+        viewModelScope.launch {
+            var lastId: String? = null
             _playerState.collect { state ->
-                val song = state.currentSong ?: return@collect
-                try {
-                    downloadRepository.getDownloadState(song.id).collect { downloadState ->
-                        _currentSongDownloadState.value = downloadState
+                val song = state.currentSong ?: run {
+                    lastId = null
+                    _isCurrentLiked.value = false
+                    return@collect
+                }
+                if (song.id == lastId) return@collect
+                lastId = song.id
+                _isCurrentLiked.value = try {
+                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                        songDao.getSongById(song.id)?.isLiked == true
                     }
                 } catch (e: Exception) {
-                    Log.e("CRANK_PLAYER", "Failed to observe download state: ${e.message}")
+                    Log.e("CRANK_PLAYER", "Failed to read liked state: ${e.message}")
+                    false
                 }
+            }
+        }
+    }
+
+    /** Toggles the current song in Library → Liked Music. */
+    fun toggleLikeCurrentSong() {
+        val song = _playerState.value.currentSong ?: return
+        viewModelScope.launch {
+            try {
+                val liked = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    val existing = songDao.getSongById(song.id)
+                    if (existing != null) {
+                        songDao.updateSong(existing.copy(isLiked = !existing.isLiked))
+                        !existing.isLiked
+                    } else {
+                        songDao.insertSong(song.toEntity(isLiked = true))
+                        true
+                    }
+                }
+                _isCurrentLiked.value = liked
+            } catch (e: Exception) {
+                Log.e("CRANK_PLAYER", "Failed to toggle like: ${e.message}")
             }
         }
     }
@@ -587,6 +799,14 @@ class PlayerViewModel @Inject constructor(
     }
 
     companion object {
+        /**
+         * How long after a tap a zero-byte download still earns the spinner.
+         *
+         * Covers slow starts; past this with no bytes the entry is treated as
+         * stale and the arrow (retry) returns.
+         */
+        private const val TAP_FRESH_WINDOW_MS = 60_000L
+
         /**
          * How large [failedRetryTokens] may grow before it is cleared.
          *
@@ -737,7 +957,9 @@ class PlayerViewModel @Inject constructor(
                 MediaMetadata.Builder()
                     .setTitle(song.title)
                     .setArtist(song.artistName)
-                    .setAlbumTitle(song.albumId)
+                    .setAlbumTitle(
+                        song.albumId?.takeIf { it.isNotBlank() && !looksLikeOpaqueId(it) }
+                    )
                     .setArtworkUri(if (song.artworkUrl.isNotBlank()) song.artworkUrl.toUri() else null)
                     .build()
             )
@@ -746,6 +968,11 @@ class PlayerViewModel @Inject constructor(
         player.setMediaItem(mediaItem)
         player.prepare()
         player.play()
+
+        // The track is genuinely starting (token verified current above), so
+        // this — not queue insertion, not track end — is the history moment.
+        // handleSongEnd keeps its own call; REPLACE semantics make it idempotent.
+        recordHistory(song)
 
         // Record which attempt is now on the player, so a later 403 can be attributed to it.
         lastErrorToken = token
@@ -1095,18 +1322,29 @@ class PlayerViewModel @Inject constructor(
         _playerState.update { it.copy(errorMessage = null) }
     }
 
+    /**
+     * Starts downloading the current song.
+     *
+     * Fire-and-forget by design: [observeCurrentSongDownload] is the single
+     * owner of [_currentSongDownloadState] (database ground truth + live
+     * feed), so this must not write it beyond the instant optimistic tick.
+     * The previous endless collect here raced the observer and painted the
+     * old song's state onto the new one after a skip.
+     */
     fun downloadCurrentSong() {
         val song = _playerState.value.currentSong ?: return
+        downloadTapTimes[song.id] = System.currentTimeMillis()
         viewModelScope.launch {
-            _currentSongDownloadState.value = DownloadState.DOWNLOADING
+            if (_playerState.value.currentSong?.id == song.id) {
+                _currentSongDownloadState.value = DownloadState.DOWNLOADING
+            }
             try {
                 downloadRepository.downloadSong(song)
-                downloadRepository.getDownloadState(song.id).collect { state ->
-                    _currentSongDownloadState.value = state
-                }
             } catch (e: Exception) {
                 Log.e("CRANK_PLAYER", "Download failed: ${e.message}")
-                _currentSongDownloadState.value = DownloadState.FAILED
+                if (_playerState.value.currentSong?.id == song.id) {
+                    _currentSongDownloadState.value = DownloadState.FAILED
+                }
             }
         }
     }

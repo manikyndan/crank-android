@@ -59,6 +59,7 @@ import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -124,7 +125,12 @@ fun LibraryScreen(
     val mostPlayed = uiState.smartPlaylistContents[SmartPlaylistKind.MOST_PLAYED.slug].orEmpty()
     val recentSongs = if (mostPlayed.isNotEmpty()) mostPlayed else uiState.recentlyAdded
     val likedCount = uiState.songs.size
-    val historyCount = mostPlayed.size
+    val historyCount = uiState.historyItems.size
+
+    // Refresh on entry so likes/downloads/plays from other screens show up.
+    LaunchedEffect(Unit) {
+        libraryViewModel.refresh()
+    }
 
     // "Date Added" leaves lists in their stored order, which is newest-first for
     // playlists; only "A to Z" reorders. Artists/albums already arrive sorted.
@@ -186,7 +192,7 @@ fun LibraryScreen(
                                 title = "History",
                                 subtitle = "Playlist • ${countSongs(historyCount)}",
                                 onClick = {
-                                    onPlaylistClick(Collection.RECENTLY_PLAYED.slug)
+                                    libraryViewModel.selectSection(LibrarySection.HISTORY)
                                     haptic()
                                 }
                             )
@@ -485,6 +491,46 @@ fun LibraryScreen(
                             }
                         }
                     }
+
+                    LibrarySection.HISTORY -> {
+                        if (uiState.historyItems.isEmpty()) {
+                            item {
+                                YtEmptyState(
+                                    icon = Icons.Default.History,
+                                    title = "No listening history yet",
+                                    message = "Songs you play will show up here",
+                                    ctaText = "Browse music",
+                                    onCtaClick = onBrowseClick
+                                )
+                            }
+                        } else {
+                            // Newest-first already; group consecutive rows by recency.
+                            var lastGroup: String? = null
+                            uiState.historyItems.forEach { entry ->
+                                val group = historyGroup(entry.playedAt)
+                                if (group != lastGroup) {
+                                    lastGroup = group
+                                    item(key = "history-header-$group") {
+                                        YtListSubheader(group)
+                                    }
+                                }
+                                item(key = "history-${entry.song.id}-$group") {
+                                    YtSongRow(
+                                        song = entry.song,
+                                        onClick = {
+                                            onSongSelect(entry.song)
+                                            haptic()
+                                        },
+                                        onMenuClick = {
+                                            optionsTarget =
+                                                LibraryOptionsTarget.SongItem(entry.song)
+                                            haptic()
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -587,6 +633,7 @@ private val YT_FILTER_ORDER = listOf(
     LibrarySection.ALBUMS to "Albums",
     LibrarySection.ARTISTS to "Artists",
     LibrarySection.DOWNLOADED to "Downloads",
+    LibrarySection.HISTORY to "History",
 )
 
 /** Sort values are the exact strings LibraryViewModel.getFilteredSongs matches on. */
@@ -606,6 +653,20 @@ private sealed interface LibraryOptionsTarget {
 }
 
 private fun countSongs(count: Int): String = if (count == 1) "1 song" else "$count songs"
+
+/** Buckets a play timestamp into Today / Yesterday / Last Week / Older. */
+private fun historyGroup(playedAt: Long): String {
+    val now = java.util.Calendar.getInstance()
+    val then = java.util.Calendar.getInstance().apply { timeInMillis = playedAt }
+    val sameDay = now.get(java.util.Calendar.YEAR) == then.get(java.util.Calendar.YEAR) &&
+        now.get(java.util.Calendar.DAY_OF_YEAR) == then.get(java.util.Calendar.DAY_OF_YEAR)
+    if (sameDay) return "Today"
+    val yesterday = java.util.Calendar.getInstance().apply { add(java.util.Calendar.DAY_OF_YEAR, -1) }
+    if (yesterday.get(java.util.Calendar.YEAR) == then.get(java.util.Calendar.YEAR) &&
+        yesterday.get(java.util.Calendar.DAY_OF_YEAR) == then.get(java.util.Calendar.DAY_OF_YEAR)
+    ) return "Yesterday"
+    return if (now.timeInMillis - playedAt < 7L * 24 * 60 * 60 * 1000) "Last Week" else "Older"
+}
 
 /** Recovers the display album title with the same rule the ViewModel groups on. */
 private fun displayAlbumTitle(song: Song): String =

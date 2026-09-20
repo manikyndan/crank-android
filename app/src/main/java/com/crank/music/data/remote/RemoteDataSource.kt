@@ -1,6 +1,7 @@
 package com.crank.music.data.remote
 
 import com.crank.music.domain.model.Album
+import com.crank.music.domain.model.AlbumWithKind
 import com.crank.music.domain.model.Song
 import io.ktor.client.HttpClient
 import io.ktor.client.call.body
@@ -34,6 +35,7 @@ data class ITunesTrackDto(
 interface RemoteDataSource {
     suspend fun searchMusic(query: String): List<Song>
     suspend fun searchAlbums(query: String): List<Album>
+    suspend fun searchAlbumsWithKind(query: String): List<AlbumWithKind>
     suspend fun getHomeData(): List<Album>
 }
 
@@ -75,6 +77,12 @@ class RemoteDataSourceImpl @Inject constructor(
             e.printStackTrace()
             emptyList()
         }
+    }
+
+    override suspend fun searchAlbumsWithKind(query: String): List<AlbumWithKind> {
+        // iTunes album entities carry no single/EP distinction the UI can read,
+        // so everything reports kind "" (full album) rather than a guessed split.
+        return searchAlbums(query).map { AlbumWithKind(album = it, kind = "") }
     }
 
     override suspend fun getHomeData(): List<Album> {

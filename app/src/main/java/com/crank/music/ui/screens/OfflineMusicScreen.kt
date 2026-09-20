@@ -286,9 +286,27 @@ private fun SmartOfflineHubSection(
     }
 }
 
+/**
+ * Fraction of the storage volume in use, clamped to 0f..1f.
+ *
+ * Extracted from the composable so the guard below is covered by a test rather than only by
+ * inspection — an unguarded version of this crashed the whole screen (see [StorageIndicator]).
+ *
+ * Returns 0f when [totalStorage] is unknown (0), which is the state the screen composes with
+ * before the IO query resolves. The guard is not cosmetic: `coerceIn` does NOT filter NaN out,
+ * because NaN compares false against both bounds and is therefore returned unchanged. A NaN
+ * passed to an animation throws "AnimationVector cannot contain a NaN" and takes the app down.
+ */
+internal fun storageUsedFraction(totalStorage: Long, usedStorage: Long): Float =
+    if (totalStorage > 0L) {
+        (usedStorage.toFloat() / totalStorage.toFloat()).coerceIn(0f, 1f)
+    } else {
+        0f
+    }
+
 @Composable
 private fun StorageIndicator(totalStorage: Long, usedStorage: Long) {
-    val usedFraction = (usedStorage.toFloat() / totalStorage.toFloat()).coerceIn(0f, 1f)
+    val usedFraction = storageUsedFraction(totalStorage, usedStorage)
     val animatedProgress by animateFloatAsState(
         targetValue = usedFraction,
         animationSpec = tween(1200, easing = LinearEasing),

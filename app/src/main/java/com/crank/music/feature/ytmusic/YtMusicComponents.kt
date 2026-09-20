@@ -31,6 +31,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -443,11 +444,11 @@ fun YtCategoryChip(
     }
 }
 
-/** Continue-listening card with progress indicator. */
+/** Continue-listening card. [progress] is null when no saved position exists — no bar then. */
 @Composable
 fun YtContinueCard(
     song: Song,
-    progress: Float,
+    progress: Float?,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -462,19 +463,21 @@ fun YtContinueCard(
                 contentDescription = song.title,
                 modifier = Modifier.fillMaxSize(),
             )
-            Box(
-                modifier = Modifier
-                    .align(Alignment.BottomStart)
-                    .fillMaxWidth()
-                    .height(3.dp)
-                    .background(MaterialTheme.colorScheme.surfaceVariant),
-            ) {
+            if (progress != null) {
                 Box(
                     modifier = Modifier
-                        .fillMaxWidth(progress.coerceIn(0f, 1f))
+                        .align(Alignment.BottomStart)
+                        .fillMaxWidth()
                         .height(3.dp)
-                        .background(MaterialTheme.colorScheme.primary),
-                )
+                        .background(MaterialTheme.colorScheme.surfaceVariant),
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth(progress.coerceIn(0f, 1f))
+                            .height(3.dp)
+                            .background(MaterialTheme.colorScheme.primary),
+                    )
+                }
             }
         }
         Spacer(modifier = Modifier.height(6.dp))
@@ -498,8 +501,7 @@ fun YtContinueCard(
     }
 }
 
-/** Loading skeleton row reusing the app's ShimmerBox. */
-@Composable
+/** Loading skeleton row reusing the app's ShimmerBox. */@Composable
 fun YtLoadingRow(
     cardWidth: Int = 120,
     cardHeight: Int = 120,
@@ -530,3 +532,96 @@ fun YtLoadingRow(
         }
     }
 }
+
+/** Trending chart row: rank number + artwork + title/artist. */
+@Composable
+fun YtTrendingCard(
+    entry: YtTrendingEntry,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier = modifier
+            .width(280.dp)
+            .then(pressModifier(onClick)),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = entry.rank.toString(),
+            style = MaterialTheme.typography.headlineMedium,
+            fontWeight = FontWeight.Black,
+            color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.85f),
+            modifier = Modifier.width(36.dp),
+            maxLines = 1,
+        )
+        YtArtwork(
+            url = entry.song.artworkUrl,
+            contentDescription = entry.song.title,
+            modifier = Modifier.size(64.dp),
+        )
+        Spacer(modifier = Modifier.width(10.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = entry.song.title,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.SemiBold,
+                fontSize = 14.sp,
+                color = MaterialTheme.colorScheme.onBackground,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = entry.song.artistName,
+                style = MaterialTheme.typography.bodySmall,
+                fontSize = 12.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
+/** Vibrant gradient tile for the mood grid. Colors are presentation only. */
+@Composable
+fun YtMoodTile(
+    category: YtMoodCategory,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val colors = MOOD_GRADIENTS[category.id] ?: (Color(0xFF3A3A3C) to Color(0xFF1C1C1E))
+    Box(
+        modifier = modifier
+            .height(76.dp)
+            .clip(RoundedCornerShape(CrankRadius.Large))
+            .background(
+                androidx.compose.ui.graphics.Brush.linearGradient(
+                    colors = listOf(colors.first, colors.second)
+                )
+            )
+            .then(pressModifier(onClick))
+            .padding(14.dp),
+        contentAlignment = Alignment.BottomStart,
+    ) {
+        Text(
+            text = category.label,
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.Bold,
+            fontSize = 16.sp,
+            color = Color.White,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+private val MOOD_GRADIENTS = mapOf(
+    "workout" to (Color(0xFFE13300) to Color(0xFF7A1E00)),
+    "chill" to (Color(0xFF2E77D0) to Color(0xFF12325E)),
+    "focus" to (Color(0xFF6B3FA0) to Color(0xFF2E1A4D)),
+    "party" to (Color(0xFFE8115B) to Color(0xFF7A0B32)),
+    "commute" to (Color(0xFF1DB954) to Color(0xFF0B4D24)),
+    "rock" to (Color(0xFF535353) to Color(0xFF1B1B1B)),
+    "latin" to (Color(0xFFF5A623) to Color(0xFF7A4A00)),
+    "throwback" to (Color(0xFF8D67AB) to Color(0xFF3E2A55)),
+)

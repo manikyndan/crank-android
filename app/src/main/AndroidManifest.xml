@@ -3,6 +3,20 @@
     xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <!--
+        Required by Media3's download requirements checking, not by the app directly.
+
+        DownloadManager gates every transfer on its Requirements, and evaluating
+        Requirements(Requirements.NETWORK) reads the active network through
+        ConnectivityManager — which needs ACCESS_NETWORK_STATE. Without it that read fails and
+        the requirement is treated as unmet, so the manager accepts the request, records it as
+        QUEUED, and then never starts the transfer: zero bytes, no error, forever. Every
+        download therefore stalled at "Downloading" and no song ever reached the downloaded
+        state, which is why the completed control was unreachable in practice.
+
+        This is a normal permission: granted at install, never prompted for.
+    -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />

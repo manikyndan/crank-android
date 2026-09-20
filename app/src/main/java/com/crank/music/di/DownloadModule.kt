@@ -11,6 +11,7 @@ import androidx.media3.datasource.cache.LeastRecentlyUsedCacheEvictor
 import androidx.media3.datasource.cache.SimpleCache
 import androidx.media3.exoplayer.offline.DownloadIndex
 import androidx.media3.exoplayer.offline.DownloadManager
+import androidx.media3.exoplayer.scheduler.Requirements
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -54,7 +55,14 @@ object DownloadModule {
         databaseProvider: DatabaseProvider,
         cache: Cache
     ): DownloadManager {
+        // Same browser UA as the player's data source: googlevideo rejects
+        // the fetch with a 403 otherwise, so every download sat in a retry
+        // loop with zero bytes forever and nothing ever completed.
         val dataSourceFactory = DefaultHttpDataSource.Factory()
+            .setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
+            .setAllowCrossProtocolRedirects(true)
+            .setConnectTimeoutMs(15_000)
+            .setReadTimeoutMs(30_000)
         val executor = Executors.newFixedThreadPool(4)
         return DownloadManager(
             context,
@@ -62,7 +70,25 @@ object DownloadModule {
             cache,
             dataSourceFactory,
             executor
-        )
+        ).apply {
+            // Media3 only runs downloads when these are met, and the default
+            // demands an unmetered network — on mobile data every download sat
+            // queued with zero bytes forever while streaming worked fine.
+            // A download here is always an explicit per-song user tap, so any
+            // connected network is the honest requirement.
+            requirements = Requirements(Requirements.NETWORK)
+
+            // DownloadManager is constructed *paused*. Until it is resumed it accepts
+            // addDownload() calls, writes each one to the index as STATE_QUEUED, and never
+            // starts a transfer — so every download sat at "Downloading" with zero bytes
+            // forever and no song ever reached the downloaded state. Nothing in the app called
+            // resumeDownloads(), so the manager stayed paused for the whole process lifetime.
+            //
+            // Resuming here restores the default the rest of the app assumes. The user-facing
+            // pause control on the Offline screen still works: it pauses this same instance at
+            // runtime, and an explicit per-song tap resumes it again.
+            resumeDownloads()
+        }
     }
 
     @Provides

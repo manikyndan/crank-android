@@ -170,6 +170,9 @@ dependencies {
     // Navigation - Compose Navigation
     implementation(libs.androidx.navigation.compose)
 
+    // Palette - dominant color extraction for the Now Playing gradient
+    implementation(libs.androidx.palette)
+
     // Media3 ExoPlayer - Audio Playback & Downloads
     implementation(libs.media3.exoplayer)
     implementation(libs.media3.exoplayer.dash)

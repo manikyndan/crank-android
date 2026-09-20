@@ -73,9 +73,23 @@ class SearchViewModel @Inject constructor(
 
     fun onQueryChanged(newQuery: String) {
         _uiState.value = _uiState.value.copy(searchQuery = newQuery)
-        if (newQuery.isNotBlank() && newQuery.length >= 2) {
-            addRecentSearch(newQuery)
-        }
+        performSearch()
+    }
+
+    /**
+     * Saves the current query to history. Called only on explicit submit
+     * (keyboard search action) or when a recent/suggestion row is tapped —
+     * never on keystroke, so intermediate states are never recorded.
+     */
+    fun submitSearch() {
+        val query = _uiState.value.searchQuery.trim()
+        if (query.isNotBlank()) addRecentSearch(query)
+    }
+
+    /** Re-runs a tapped recent search and re-bumps its timestamp. */
+    fun recallSearch(query: String) {
+        _uiState.value = _uiState.value.copy(searchQuery = query)
+        addRecentSearch(query)
         performSearch()
     }
 

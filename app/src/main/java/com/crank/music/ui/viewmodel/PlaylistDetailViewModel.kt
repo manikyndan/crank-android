@@ -110,8 +110,39 @@ class PlaylistDetailViewModel @Inject constructor(
 
             DestinationKind.GENRE -> searchAndLoad(genreName)
 
-            // An unrecognised slug stops loading rather than searching for a placeholder.
-            DestinationKind.UNKNOWN -> _uiState.value = _uiState.value.copy(isLoading = false)
+            // A user-created playlist id (UUID) matches no vocabulary above.
+            // Resolve it from the local database instead of showing "Unknown".
+            DestinationKind.UNKNOWN -> loadUserPlaylist()
+        }
+    }
+
+    private fun loadUserPlaylist() {
+        viewModelScope.launch {
+            try {
+                val entity = withContext(Dispatchers.IO) {
+                    songDao.getPlaylistById(playlistId)
+                }
+                if (entity == null) {
+                    _uiState.value = _uiState.value.copy(isLoading = false)
+                    return@launch
+                }
+                val songs = withContext(Dispatchers.IO) {
+                    songDao.getSongIdsForPlaylist(playlistId)
+                        .mapNotNull { songDao.getSongById(it)?.toSong() }
+                }
+                _uiState.value = _uiState.value.copy(
+                    title = entity.title,
+                    subtitle = "${songs.size} songs",
+                    songs = songs,
+                    isLoading = false,
+                    isUnknownCollection = false,
+                )
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.e("CRANK_PLAYLIST", "Failed to load user playlist $playlistId: ${e.message}", e)
+                _uiState.value = _uiState.value.copy(isLoading = false)
+            }
         }
     }
 

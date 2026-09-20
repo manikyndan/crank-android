@@ -4,10 +4,15 @@ import android.util.Log
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.crank.music.data.local.SongDao
+import com.crank.music.data.local.toEntity
 import com.crank.music.domain.model.Album
 import com.crank.music.domain.model.Song
+import com.crank.music.domain.repository.DownloadRepository
 import com.crank.music.domain.repository.MusicRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -18,6 +23,8 @@ import javax.inject.Inject
 data class AlbumDetailUiState(
     val album: Album? = null,
     val songs: List<Song> = emptyList(),
+    val moreByArtist: List<Album> = emptyList(),
+    val isSavedToLibrary: Boolean = false,
     val isLoading: Boolean = false,
     val isResolved: Boolean = false,
 )
@@ -37,7 +44,9 @@ data class AlbumDetailUiState(
 @HiltViewModel
 class AlbumDetailViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
-    private val musicRepository: MusicRepository
+    private val musicRepository: MusicRepository,
+    private val songDao: SongDao,
+    private val downloadRepository: DownloadRepository,
 ) : ViewModel() {
 
     private val albumTitle: String = savedStateHandle.get<String>("albumTitle").orEmpty()
@@ -96,13 +105,14 @@ class AlbumDetailViewModel @Inject constructor(
                 // stays blank rather than invented. Browse responses preserve the
                 // album's true track order, passed through untouched.
                 val artwork = initialArtwork.ifBlank { results.firstOrNull()?.artworkUrl.orEmpty() }
+                val resolvedArtist = albumArtist.ifBlank {
+                    results.firstOrNull()?.artistName ?: "Various Artists"
+                }
                 _uiState.value = AlbumDetailUiState(
                     album = Album(
                         id = browseId.ifBlank { albumTitle },
                         title = albumTitle,
-                        artistName = albumArtist.ifBlank {
-                            results.firstOrNull()?.artistName ?: "Various Artists"
-                        },
+                        artistName = resolvedArtist,
                         releaseYear = initialYear,
                         artworkUrl = artwork,
                         trackCount = results.size,
@@ -111,11 +121,77 @@ class AlbumDetailViewModel @Inject constructor(
                     isLoading = false,
                     isResolved = true,
                 )
+                loadMoreByArtist(resolvedArtist, albumTitle)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
                 Log.e("CRANK_ALBUM", "Failed to load '$albumTitle': ${e.message}", e)
                 _uiState.value = _uiState.value.copy(isLoading = false, isResolved = true)
+            }
+        }
+    }
+
+    /**
+     * Other albums by the same artist, from the real album-search endpoint.
+     * The current album is excluded by browse id (or title when the id is a
+     * local fallback), so the row never recommends the album being viewed.
+     */
+    private fun loadMoreByArtist(artistName: String, currentTitle: String) {
+        if (artistName.isBlank() || artistName == "Various Artists") return
+        viewModelScope.launch {
+            try {
+                val currentId = browseId.ifBlank { currentTitle }
+                val more = musicRepository.searchAlbums(artistName)
+                    .filter { it.id != currentId && !it.title.equals(currentTitle, ignoreCase = true) }
+                    .distinctBy { it.id }
+                    .take(10)
+                _uiState.value = _uiState.value.copy(moreByArtist = more)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.e("CRANK_ALBUM", "Failed to load more by '$artistName': ${e.message}", e)
+            }
+        }
+    }
+
+    /**
+     * Saves every track of this album to the library as liked songs, reusing
+     * the same [toEntity] mapping the library itself reads back.
+     */
+    fun saveToLibrary() {
+        val tracks = _uiState.value.songs
+        if (tracks.isEmpty() || _uiState.value.isSavedToLibrary) return
+        viewModelScope.launch {
+            try {
+                withContext(Dispatchers.IO) {
+                    songDao.insertSongs(tracks.map { it.toEntity(isLiked = true) })
+                }
+                _uiState.value = _uiState.value.copy(isSavedToLibrary = true)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.e("CRANK_ALBUM", "Failed to save album: ${e.message}", e)
+            }
+        }
+    }
+
+    /**
+     * Queues every track for offline download through the existing
+     * [DownloadRepository]. Fire-and-forget: progress and completion are owned
+     * by the download manager, not this screen.
+     */
+    fun downloadAlbum() {
+        val tracks = _uiState.value.songs
+        if (tracks.isEmpty()) return
+        viewModelScope.launch {
+            tracks.forEach { track ->
+                try {
+                    downloadRepository.downloadSong(track)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    Log.e("CRANK_ALBUM", "Failed to queue download for '${track.title}': ${e.message}", e)
+                }
             }
         }
     }

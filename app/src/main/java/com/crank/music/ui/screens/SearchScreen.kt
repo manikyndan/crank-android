@@ -82,6 +82,7 @@ fun SearchScreen(
             query = uiState.searchQuery,
             onQueryChange = { searchViewModel.onQueryChanged(it) },
             onClearClick = { searchViewModel.onQueryChanged("") },
+            onSearchSubmit = { searchViewModel.submitSearch() },
             modifier = Modifier.padding(horizontal = 20.dp)
         )
 
@@ -111,7 +112,7 @@ fun SearchScreen(
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clickable { searchViewModel.onQueryChanged(recent) }
+                                .clickable { searchViewModel.recallSearch(recent) }
                                 .padding(vertical = 12.dp),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.SpaceBetween
