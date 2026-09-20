@@ -1,6 +1,7 @@
 package com.crank.music.ui.screens
 
 import android.view.HapticFeedbackConstants
+import android.widget.Toast
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
@@ -73,6 +74,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -112,6 +114,8 @@ fun LibraryScreen(
     onSongSelect: (Song) -> Unit = {},
     /** Opens the dedicated Liked Songs destination. */
     onLikedMusicClick: () -> Unit = {},
+    /** Opens the dedicated Downloaded Music destination (locally stored tracks). */
+    onDownloadedMusicClick: () -> Unit = {},
     onPlaylistClick: (String) -> Unit = {},
     onSmartPlaylistClick: (String) -> Unit = onPlaylistClick,
     onArtistClick: (String) -> Unit = {},
@@ -120,6 +124,7 @@ fun LibraryScreen(
 ) {
     val uiState by libraryViewModel.uiState.collectAsState()
     val view = LocalView.current
+    val context = LocalContext.current
     var optionsTarget by remember { mutableStateOf<LibraryOptionsTarget?>(null) }
 
     fun haptic() = view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
@@ -212,6 +217,21 @@ fun LibraryScreen(
                                     // place — so there was no Liked screen to navigate to and the
                                     // row could not take you anywhere the tab row did not.
                                     onLikedMusicClick()
+                                    haptic()
+                                }
+                            )
+                        }
+                        item {
+                            // Downloaded Music sits directly under Liked Music: same card shape,
+                            // same "Playlist • N songs" subtitle, so the two read as a pair.
+                            YtPinnedRow(
+                                icon = Icons.Default.Download,
+                                iconTint = MaterialTheme.colorScheme.onPrimary,
+                                tileColor = MaterialTheme.colorScheme.secondary,
+                                title = "Downloaded Music",
+                                subtitle = "Playlist • ${countSongs(uiState.downloadedSongs.size)}",
+                                onClick = {
+                                    onDownloadedMusicClick()
                                     haptic()
                                 }
                             )
@@ -567,11 +587,18 @@ fun LibraryScreen(
                 description = uiState.createPlaylistDescription,
                 isPrivate = uiState.createPlaylistIsPrivate,
                 coverIndex = uiState.createPlaylistCoverIndex,
+                existingNames = uiState.playlists.map { it.title },
                 onNameChange = { libraryViewModel.updateCreatePlaylistName(it) },
                 onDescriptionChange = { libraryViewModel.updateCreatePlaylistDescription(it) },
                 onTogglePrivacy = { libraryViewModel.toggleCreatePlaylistPrivacy() },
                 onCoverSelect = { libraryViewModel.setCreatePlaylistCover(it) },
                 onCreate = {
+                    // Confirmation, so creating a playlist is not a silent action.
+                    Toast.makeText(
+                        context,
+                        "\"${uiState.createPlaylistName.trim()}\" created",
+                        Toast.LENGTH_SHORT,
+                    ).show()
                     libraryViewModel.createPlaylist()
                     haptic()
                 },
@@ -914,48 +941,71 @@ private fun YtNewPlaylistRow(onClick: () -> Unit) {
     }
 }
 
+/**
+ * Apple Music inspired playlist row: larger artwork, roomier padding, a title that leads and a
+ * hairline divider inset to line up with the text.
+ *
+ * The 3-dot menu stays. Apple Music navigates with a chevron, but this row's menu is the only
+ * route to rename/delete, so swapping it for a chevron would trade a working action for a
+ * prettier glyph. The polish comes from spacing and type hierarchy instead.
+ */
 @Composable
 private fun YtPlaylistRow(
     playlist: Playlist,
     onClick: () -> Unit,
     onMenuClick: () -> Unit,
 ) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable { onClick() }
-            .padding(horizontal = 16.dp, vertical = 7.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        YtArtwork(
-            url = playlist.artworkUrl,
-            contentDescription = playlist.title
+    Column {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { onClick() }
+                .padding(horizontal = 20.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            YtArtwork(
+                url = playlist.artworkUrl,
+                contentDescription = playlist.title,
+                modifier = Modifier.size(60.dp),
+            )
+            Spacer(modifier = Modifier.width(14.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = playlist.title,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onBackground,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    text = "Playlist • ${countSongs(playlist.songCount)}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+            IconButton(onClick = onMenuClick) {
+                Icon(
+                    imageVector = Icons.Default.MoreVert,
+                    contentDescription = "Options",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+        }
+
+        // Inset to start where the text starts, so the divider reads as belonging to the row
+        // rather than cutting across the artwork.
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 20.dp)
+                .height(0.5.dp)
+                .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
         )
-        Spacer(modifier = Modifier.width(12.dp))
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = playlist.title,
-                style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Bold),
-                color = MaterialTheme.colorScheme.onBackground,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-            Text(
-                text = "Playlist • ${countSongs(playlist.songCount)}",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-        }
-        IconButton(onClick = onMenuClick) {
-            Icon(
-                imageVector = Icons.Default.MoreVert,
-                contentDescription = "Options",
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.size(20.dp)
-            )
-        }
     }
 }
 
@@ -1585,6 +1635,9 @@ private fun MultiSelectAction(
     }
 }
 
+/** Upper bound for a playlist name. Long enough for a real title, short enough to render. */
+private const val MAX_PLAYLIST_NAME_LENGTH = 50
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun CreatePlaylistModal(
@@ -1592,6 +1645,8 @@ private fun CreatePlaylistModal(
     description: String,
     isPrivate: Boolean,
     coverIndex: Int,
+    /** Titles already in the library, so a duplicate can be refused before it is created. */
+    existingNames: List<String>,
     onNameChange: (String) -> Unit,
     onDescriptionChange: (String) -> Unit,
     onTogglePrivacy: () -> Unit,
@@ -1600,6 +1655,19 @@ private fun CreatePlaylistModal(
     onDismiss: () -> Unit
 ) {
     val sheetState = rememberModalBottomSheetState()
+
+    // Validation lives here, next to the field that shows it, so the error and the control that
+    // caused it can never disagree. The ViewModel still guards creation independently.
+    val trimmedName = name.trim()
+    val isTooLong = name.length > MAX_PLAYLIST_NAME_LENGTH
+    val isDuplicate = trimmedName.isNotEmpty() &&
+        existingNames.any { it.equals(trimmedName, ignoreCase = true) }
+    val nameError: String? = when {
+        isTooLong -> "Name must be $MAX_PLAYLIST_NAME_LENGTH characters or fewer"
+        isDuplicate -> "A playlist with this name already exists"
+        else -> null
+    }
+    val canCreate = trimmedName.isNotEmpty() && nameError == null
     val coverColors = listOf(
         Color(0xFFD4AF37),
         Color(0xFFE53935),
@@ -1681,14 +1749,43 @@ private fun CreatePlaylistModal(
 
             OutlinedTextField(
                 value = name,
-                onValueChange = onNameChange,
-                placeholder = { Text("Playlist Name", color = MaterialTheme.colorScheme.onSurfaceVariant) },
+                // Hard-stop at the limit rather than letting the user type into an error state
+                // and then telling them off for it.
+                onValueChange = { if (it.length <= MAX_PLAYLIST_NAME_LENGTH) onNameChange(it) },
+                placeholder = { Text("Playlist name", color = MaterialTheme.colorScheme.onSurfaceVariant) },
                 singleLine = true,
+                isError = nameError != null,
+                supportingText = {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            text = nameError.orEmpty(),
+                            color = MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.labelSmall
+                        )
+                        Text(
+                            text = "${name.length}/$MAX_PLAYLIST_NAME_LENGTH",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            style = MaterialTheme.typography.labelSmall
+                        )
+                    }
+                },
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
                     unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
-                    focusedBorderColor = MaterialTheme.colorScheme.primary,
-                    unfocusedBorderColor = Color.Transparent,
+                    focusedBorderColor = if (nameError != null) {
+                        MaterialTheme.colorScheme.error
+                    } else {
+                        MaterialTheme.colorScheme.primary
+                    },
+                    unfocusedBorderColor = if (nameError != null) {
+                        MaterialTheme.colorScheme.error
+                    } else {
+                        Color.Transparent
+                    },
+                    errorBorderColor = MaterialTheme.colorScheme.error,
                     cursorColor = MaterialTheme.colorScheme.primary,
                     focusedTextColor = MaterialTheme.colorScheme.onBackground,
                     unfocusedTextColor = MaterialTheme.colorScheme.onBackground
@@ -1757,10 +1854,8 @@ private fun CreatePlaylistModal(
             Spacer(modifier = Modifier.height(24.dp))
 
             Button(
-                onClick = {
-                    if (name.isNotBlank()) onCreate()
-                },
-                enabled = name.isNotBlank(),
+                onClick = { if (canCreate) onCreate() },
+                enabled = canCreate,
                 colors = ButtonDefaults.buttonColors(
                     containerColor = MaterialTheme.colorScheme.primary,
                     contentColor = MaterialTheme.colorScheme.onPrimary,

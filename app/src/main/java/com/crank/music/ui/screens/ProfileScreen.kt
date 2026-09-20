@@ -40,7 +40,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import coil3.compose.AsyncImage
+import com.crank.music.ui.components.GroupedSettingsSection
 import com.crank.music.ui.components.SectionHeader
+import com.crank.music.ui.components.SettingsNavRow
 import com.crank.music.ui.components.StatCard
 import com.crank.music.ui.theme.ChampagneGold
 import com.crank.music.ui.theme.CharcoalElevated
@@ -165,22 +167,17 @@ fun ProfileScreen(
         }
 
         item {
-            Column {
-                SectionHeader(title = "Quick Actions")
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    quickActions.chunked(2).forEach { rowActions ->
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            rowActions.forEach { action ->
-                                QuickActionCard(
-                                    action = action,
-                                    modifier = Modifier.weight(1f)
-                                )
-                            }
-                        }
-                    }
+            // One grouped list rather than a tile grid. Same actions, but each row carries a
+            // chevron so it reads as navigation, and the section matches Settings' shape — which
+            // is the consistency Apple Music's Profile/Settings screens have.
+            GroupedSettingsSection(title = "Quick Actions") {
+                quickActions.forEachIndexed { index, action ->
+                    SettingsNavRow(
+                        icon = action.icon,
+                        title = action.title,
+                        onClick = action.onClick,
+                        showDivider = index < quickActions.lastIndex,
+                    )
                 }
             }
         }

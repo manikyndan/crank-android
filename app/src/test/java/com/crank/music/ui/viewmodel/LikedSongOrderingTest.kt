@@ -23,12 +23,14 @@ class LikedSongOrderingTest {
         title: String,
         artist: String,
         albumId: String? = null,
+        albumName: String? = null,
         durationMs: Long = 0L,
     ) = Song(
         id = id,
         title = title,
         artistName = artist,
         albumId = albumId,
+        albumName = albumName,
         durationMs = durationMs,
         artworkUrl = "",
         isLocal = false,
@@ -70,10 +72,23 @@ class LikedSongOrderingTest {
 
     @Test
     fun `the query matches the album id`() {
-        // Album is matched on albumId because that is the only album field Song carries.
+        // Album still matches on albumId when no display name is present.
         assertEquals(
             listOf("2", "3"),
             ids(filterAndSortLikedSongs(newestFirst, "alb-a", LikedSort.RECENCY)),
+        )
+    }
+
+    @Test
+    fun `the query matches the album name when present`() {
+        val withNames = listOf(
+            song("1", "Zebra", "Beta", albumId = "x1", albumName = "Midnight Drive"),
+            song("2", "Apple", "Alpha", albumId = "x2", albumName = "After Hours"),
+            song("3", "Mango", "Gamma", albumId = "x3", albumName = "After Hours"),
+        )
+        assertEquals(
+            listOf("2", "3"),
+            ids(filterAndSortLikedSongs(withNames, "after hours", LikedSort.RECENCY)),
         )
     }
 
@@ -123,6 +138,20 @@ class LikedSongOrderingTest {
         val ordered = ids(filterAndSortLikedSongs(newestFirst, "", LikedSort.ALBUM))
         // alb-a before alb-b, so songs 2 and 3 lead and song 1 follows.
         assertEquals(listOf("2", "3", "1"), ordered)
+    }
+
+    @Test
+    fun `album sort prefers the display name over the browse id`() {
+        // Same albumId bucket, distinct display names: the name wins so the sort reads naturally.
+        val mixed = listOf(
+            song("1", "Z", "B", albumId = "same", albumName = "Zulu Sessions"),
+            song("2", "A", "A", albumId = "same", albumName = "Alpha Wave"),
+            song("3", "M", "G", albumId = "same", albumName = "Midnight"),
+        )
+        assertEquals(
+            listOf("2", "3", "1"),
+            ids(filterAndSortLikedSongs(mixed, "", LikedSort.ALBUM)),
+        )
     }
 
     @Test

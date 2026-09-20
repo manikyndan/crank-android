@@ -5,6 +5,13 @@ data class Song(
     val title: String,
     val artistName: String,
     val albumId: String?,
+    // Display name of the album this track belongs to, when the source provided one. Null when
+    // unknown (e.g. search results). Carried through to the Room `songs` table so the Liked Songs
+    // subtitle can show "Artist • Album" without a per-row network lookup.
+    val albumName: String? = null,
+    // True when the source flagged the track as explicit. Parsed from InnerTube's
+    // MUSIC_EXPLICIT_BADGE / iTunes' trackExplicitness; never invented.
+    val isExplicit: Boolean = false,
     val durationMs: Long,
     val artworkUrl: String,
     val isLocal: Boolean,

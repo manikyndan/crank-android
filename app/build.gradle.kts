@@ -141,6 +141,29 @@ android {
     }
 }
 
+/**
+ * Names the built APK after the product rather than after the Gradle module.
+ *
+ * The filename is what a recipient actually sees when the app is shared, and `app-debug.apk`
+ * says nothing about what they are installing.
+ *
+ * The release build gets the clean name because it is the one that gets shared; debug keeps a
+ * `debug` marker so the two can never be confused for each other in a downloads folder. The
+ * space is deliberate — this is a display name, not a build identifier.
+ */
+androidComponents {
+    onVariants { variant ->
+        val name = if (variant.buildType == "release") {
+            "Crank Music.apk"
+        } else {
+            "Crank Music ${variant.name}.apk"
+        }
+        variant.outputs.forEach { output ->
+            output.outputFileName.set(name)
+        }
+    }
+}
+
 dependencies {
     implementation(libs.androidx.appcompat)
     implementation(libs.material)

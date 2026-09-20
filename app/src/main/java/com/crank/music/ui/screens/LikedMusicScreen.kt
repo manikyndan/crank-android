@@ -86,14 +86,14 @@ import kotlin.math.roundToInt
  * Library and the player's heart button read and write, and the count is its length. Nothing
  * here is sample data.
  *
- * Two elements from the original brief are deliberately absent because the data model does not
- * carry them, and inventing them was not an option:
+ * Two brief elements that earlier could not be built are now wired to real data:
  *
- * - **Explicit badge** — there is no explicit flag on `Song`, in the `songs` table, or in the
- *   InnerTube parsing. Adding one would mean changing the InnerTube layer.
- * - **Album name in the subtitle** — `Song` holds `albumId` (a browseId), not a display name, so
- *   the subtitle shows the artist. Resolving an album name per row would mean one lookup per
- *   visible track.
+ * - **Explicit badge** — `Song.isExplicit` is parsed from InnerTube's `MUSIC_EXPLICIT_BADGE` and
+ *   iTunes' `trackExplicitness`, stored on the Room `songs` row, and shown as a small grey 'E'.
+ * - **Album name in the subtitle** — `Song.albumName` is captured from the album/playlist shelf
+ *   (or iTunes `collectionName`) and stored alongside, so the subtitle reads "Artist • Album".
+ *   Tracks discovered via search have no album name and fall back to the artist alone; this is a
+ *   real-data gap, not a fabrication.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -475,13 +475,15 @@ private fun LikedSearchField(
 // ── Tracklist row ──────────────────────────────────────────────────────────────────
 
 @Composable
-private fun LikedTrackRow(
+internal fun LikedTrackRow(
     index: Int,
     song: Song,
     isCurrent: Boolean,
     isPlaying: Boolean,
     onClick: () -> Unit,
     onMoreClick: () -> Unit,
+    /** False on surfaces that have no per-row menu (e.g. Downloads), so no dead button shows. */
+    showMoreButton: Boolean = true,
 ) {
     val accent = MaterialTheme.colorScheme.primary
     val titleColor = if (isCurrent) accent else MaterialTheme.colorScheme.onSurface
@@ -537,16 +539,29 @@ private fun LikedTrackRow(
             Spacer(modifier = Modifier.width(12.dp))
 
             Column(modifier = Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = song.title,
+                        color = titleColor,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false)
+                    )
+                    // Explicit badge: a small grey 'E' box, shown only when the source flagged the
+                    // track. Carried on Song.isExplicit, never invented.
+                    if (song.isExplicit) {
+                        Spacer(modifier = Modifier.width(6.dp))
+                        ExplicitBadge()
+                    }
+                }
                 Text(
-                    text = song.title,
-                    color = titleColor,
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Text(
-                    text = song.artistName,
+                    text = if (!song.albumName.isNullOrBlank()) {
+                        "${song.artistName} • ${song.albumName}"
+                    } else {
+                        song.artistName
+                    },
                     color = subtitleColor,
                     fontSize = 14.sp,
                     maxLines = 1,
@@ -562,13 +577,15 @@ private fun LikedTrackRow(
                 style = MaterialTheme.typography.bodySmall,
             )
 
-            IconButton(onClick = onMoreClick, modifier = Modifier.size(36.dp)) {
-                Icon(
-                    imageVector = Icons.Default.MoreVert,
-                    contentDescription = "More options",
-                    tint = subtitleColor,
-                    modifier = Modifier.size(20.dp),
-                )
+            if (showMoreButton) {
+                IconButton(onClick = onMoreClick, modifier = Modifier.size(36.dp)) {
+                    Icon(
+                        imageVector = Icons.Default.MoreVert,
+                        contentDescription = "More options",
+                        tint = subtitleColor,
+                        modifier = Modifier.size(20.dp),
+                    )
+                }
             }
         }
 
@@ -580,6 +597,33 @@ private fun LikedTrackRow(
                 .padding(start = 16.dp)
                 .height(0.5.dp)
                 .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+        )
+    }
+}
+
+/**
+ * The small grey 'E' box shown beside an explicit track's title, matching Spotify's convention.
+ *
+ * Purely presentational: the caller decides whether to show it from [Song.isExplicit], which is
+ * sourced from InnerTube's explicit badge or iTunes' track explicitness — never fabricated.
+ */
+@Composable
+internal fun ExplicitBadge() {
+    Box(
+        modifier = Modifier
+            .size(width = 16.dp, height = 16.dp)
+            .background(
+                MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f),
+                RoundedCornerShape(3.dp)
+            ),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = "E",
+            color = MaterialTheme.colorScheme.surface,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Bold,
+            style = MaterialTheme.typography.labelSmall,
         )
     }
 }

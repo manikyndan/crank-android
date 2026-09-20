@@ -35,6 +35,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
@@ -141,27 +143,34 @@ private fun YtArtwork(
 
 /** Small square card: artwork + title + artist. Tap plays immediately. */
 @Composable
+/**
+ * @param cardSize Artwork/width. Home passes a larger value so its feed reads a level up; every
+ *   other surface keeps the default, so scaling Home cannot silently resize the Library.
+ */
 fun YtQuickPickCard(
     song: Song,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    cardSize: Dp = 120.dp,
+    titleSize: TextUnit = 14.sp,
+    artistSize: TextUnit = 12.sp,
 ) {
     Column(
         modifier = modifier
-            .width(120.dp)
+            .width(cardSize)
             .then(pressModifier(onClick)),
     ) {
         YtArtwork(
             url = song.artworkUrl,
             contentDescription = song.title,
-            modifier = Modifier.size(120.dp),
+            modifier = Modifier.size(cardSize),
         )
         Spacer(modifier = Modifier.height(6.dp))
         Text(
             text = song.title,
             style = MaterialTheme.typography.bodyMedium,
             fontWeight = FontWeight.SemiBold,
-            fontSize = 14.sp,
+            fontSize = titleSize,
             color = MaterialTheme.colorScheme.onBackground,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
@@ -169,7 +178,7 @@ fun YtQuickPickCard(
         Text(
             text = song.artistName,
             style = MaterialTheme.typography.bodySmall,
-            fontSize = 12.sp,
+            fontSize = artistSize,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
@@ -183,14 +192,15 @@ fun YtMixCard(
     mix: YtMix,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    cardSize: Dp = 160.dp,
 ) {
     Column(
         modifier = modifier
-            .width(160.dp)
+            .width(cardSize)
             .then(pressModifier(onClick)),
     ) {
         Surface(
-            modifier = Modifier.size(160.dp),
+            modifier = Modifier.size(cardSize),
             shape = RoundedCornerShape(CrankRadius.Large),
             color = MaterialTheme.colorScheme.surfaceVariant,
             tonalElevation = 2.dp,

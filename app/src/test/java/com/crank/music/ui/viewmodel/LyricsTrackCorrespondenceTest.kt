@@ -49,7 +49,15 @@ class LyricsTrackCorrespondenceTest {
     fun `lyrics correspondence does not depend on song content`() {
         // The check is by id only. Two distinct Song objects with the same id are the same track;
         // the comparison must not require object identity or field equality.
-        val requested = Song("same", "Different Title", "Different Artist", null, 100L, "", false)
+        val requested = Song(
+            id = "same",
+            title = "Different Title",
+            artistName = "Different Artist",
+            albumId = null,
+            durationMs = 100L,
+            artworkUrl = "",
+            isLocal = false,
+        )
         assertTrue(lyricsAreForCurrentTrack(requested.id, "same"))
     }
 }

@@ -176,6 +176,8 @@ internal fun com.crank.music.data.local.LocalSongEntity.toSong(): Song = Song(
     title = title,
     artistName = artistName,
     albumId = albumId,
+    albumName = albumName,
+    isExplicit = isExplicit,
     durationMs = durationMs,
     artworkUrl = artworkUrl,
     isLocal = isLocal,
@@ -529,7 +531,11 @@ class LibraryViewModel @Inject constructor(
 
     fun createPlaylist() {
         val state = _uiState.value
-        if (state.createPlaylistName.isNotBlank()) {
+        val trimmed = state.createPlaylistName.trim()
+        // Guarded here as well as in the dialog: the sheet is one caller, and a duplicate title
+        // reaching the database would be silently unrecoverable from the UI.
+        val isDuplicate = state.playlists.any { it.title.equals(trimmed, ignoreCase = true) }
+        if (trimmed.isNotBlank() && !isDuplicate) {
             viewModelScope.launch {
                 try {
                     val newPlaylist = Playlist(

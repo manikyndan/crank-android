@@ -12,6 +12,9 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavHostController
@@ -32,12 +35,18 @@ import com.crank.music.ui.viewmodel.PlayerViewModel
 @Composable
 fun MainScreen(
     navController: NavHostController = rememberNavController(),
-    playerViewModel: PlayerViewModel = hiltViewModel()
+    playerViewModel: PlayerViewModel = hiltViewModel(),
+    libraryViewModel: com.crank.music.ui.viewmodel.LibraryViewModel = hiltViewModel()
 ) {
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route ?: NavItem.Home.route
     val playerState by playerViewModel.playerState.collectAsState()
     val song = playerState.currentSong
+    val isCurrentLiked by playerViewModel.isCurrentLiked.collectAsState()
+
+    // Raised from the mini player's "+" button. Held here, at the shell, so the sheet survives
+    // tab switches instead of being torn down with whichever screen is on top.
+    var showAddToPlaylist by remember { mutableStateOf(false) }
 
     val isFullscreenRoute = currentRoute == "now_playing" || currentRoute == "settings" || currentRoute == "appearance" || currentRoute == "privacy_security" || currentRoute == "offline_music" || currentRoute == "update_checker" || currentRoute == "playback_settings" || currentRoute == "audio_quality" || currentRoute == "crank_ai" || currentRoute == "equalizer" || currentRoute == "music_dna" || currentRoute == "downloads" || currentRoute == "queue" || currentRoute == "lyrics" || currentRoute == "recognition" || currentRoute == "liked_music" || currentRoute.startsWith("playlist_detail") || currentRoute.startsWith("album_detail") || currentRoute.startsWith("artist_detail")
 
@@ -48,7 +57,11 @@ fun MainScreen(
             Column(
                 modifier = Modifier.fillMaxWidth()
             ) {
-                if (!isFullscreenRoute) {
+                // The mini player is global, not a tab-screen extra: it sits above the bottom nav
+                // on the tab screens and stays put on detail routes (album, playlist, Liked Songs)
+                // so the playing track is always reachable without going back. Only Now Playing
+                // hides it, because that screen already *is* the full player.
+                if (song != null && currentRoute != "now_playing") {
                     MiniPlayer(
                         title = song?.title ?: "No Song Playing",
                         artist = song?.artistName ?: "Unknown Artist",
@@ -69,8 +82,16 @@ fun MainScreen(
                             }
                         },
                         onNextClick = { playerViewModel.playNext() },
-                        onPreviousClick = { playerViewModel.playPrevious() }
+                        onPreviousClick = { playerViewModel.playPrevious() },
+                        isLiked = isCurrentLiked,
+                        onLikeClick = { playerViewModel.toggleLikeCurrentSong() },
+                        onAddToPlaylistClick = { showAddToPlaylist = true }
                     )
+                }
+
+                // The nav bar keeps its original rule: tab screens only. Detail routes stay
+                // full-bleed and get the mini player by itself.
+                if (!isFullscreenRoute) {
                     BottomNavigationBar(
                         currentRoute = currentRoute,
                         onNavigate = { route ->
@@ -90,6 +111,19 @@ fun MainScreen(
             }
         }
     ) { paddingValues ->
+        // The mini player's playlist picker. Composed in the content slot rather than the bottom
+        // bar so it overlays the whole shell instead of being clipped to the bar's height.
+        if (showAddToPlaylist) {
+            AddToPlaylistSheet(
+                libraryViewModel = libraryViewModel,
+                onAdd = { playlistId ->
+                    song?.let { libraryViewModel.addSongToPlaylist(playlistId, it) }
+                    showAddToPlaylist = false
+                },
+                onDismiss = { showAddToPlaylist = false }
+            )
+        }
+
         NavHost(
             navController = navController,
             startDestination = NavItem.Home.route,
@@ -241,6 +275,9 @@ fun MainScreen(
                     },
                     onLikedMusicClick = {
                         navController.navigate("liked_music")
+                    },
+                    onDownloadedMusicClick = {
+                        navController.navigate("downloads")
                     },
                     onPlaylistClick = { playlistId ->
                         navController.navigate("playlist_detail/$playlistId")

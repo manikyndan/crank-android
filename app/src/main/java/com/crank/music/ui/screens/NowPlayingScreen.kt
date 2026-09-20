@@ -35,6 +35,8 @@ import androidx.compose.material.icons.automirrored.filled.VolumeDown
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.Bedtime
 import androidx.compose.material.icons.filled.Cast
+import androidx.compose.material.icons.filled.DarkMode
+import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.Add
@@ -107,7 +109,9 @@ import com.crank.music.ui.components.PlaybackControlsSheet
 import com.crank.music.ui.components.SleepTimerSheet
 import com.crank.music.ui.components.animatedDownloadFraction
 import com.crank.music.ui.theme.HeartRed
+import com.crank.music.ui.theme.isLight
 import com.crank.music.ui.viewmodel.PlayerViewModel
+import com.crank.music.ui.viewmodel.ThemeMode
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.StateFlow
@@ -147,6 +151,12 @@ fun NowPlayingScreen(
     var showSleepTimerSheet by remember { mutableStateOf(false) }
     var showSpeedSheet by remember { mutableStateOf(false) }
     var showMoreSheet by remember { mutableStateOf(false) }
+
+    // Dark Mode row state. Read from the same ThemePreference the theme root uses, so the icon can
+    // never disagree with the theme actually in effect.
+    val themeMode by playerViewModel.themeMode.collectAsState()
+    val systemInDarkTheme = androidx.compose.foundation.isSystemInDarkTheme()
+    val isDarkNow = !(themeMode ?: ThemeMode.DARK).isLight(systemInDarkTheme)
     var showPlaylistSheet by remember { mutableStateOf(false) }
     var showCastHint by remember { mutableStateOf(false) }
     var isScrubbing by remember { mutableStateOf(false) }
@@ -666,6 +676,17 @@ fun NowPlayingScreen(
                         showCastHint = true
                     }
                 )
+                // Sits directly below Cast, as specified. The glyph shows the *current* state
+                // (moon while dark, sun while light) so the row reads as a status as well as a
+                // control; tapping flips it and the whole app re-themes immediately.
+                MoreRow(
+                    icon = if (isDarkNow) Icons.Default.DarkMode else Icons.Default.LightMode,
+                    label = "Dark Mode",
+                    onClick = {
+                        playerViewModel.toggleDarkMode(systemInDarkTheme)
+                        showMoreSheet = false
+                    }
+                )
                 MoreRow(
                     icon = Icons.Default.Person,
                     label = "Go to Artist",
@@ -752,10 +773,15 @@ fun NowPlayingScreen(
     }
 }
 
-/** Playlist picker: existing user playlists + inline create. All Library-backed. */
+/**
+ * Playlist picker: existing user playlists + inline create. All Library-backed.
+ *
+ * `internal` rather than `private` so the mini player can raise the same sheet — one picker for
+ * both surfaces, instead of a second copy that drifts from this one.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun AddToPlaylistSheet(
+internal fun AddToPlaylistSheet(
     libraryViewModel: com.crank.music.ui.viewmodel.LibraryViewModel,
     onAdd: (String) -> Unit,
     onDismiss: () -> Unit

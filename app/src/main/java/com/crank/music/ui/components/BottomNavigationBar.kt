@@ -26,8 +26,11 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.PlaylistAdd
 import androidx.compose.material.icons.filled.Error
 import androidx.compose.material.icons.filled.Explore
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.LibraryMusic
 import androidx.compose.material.icons.filled.MusicNote
@@ -230,11 +233,15 @@ fun MiniPlayer(
     isPlaying: Boolean = false,
     isLoading: Boolean = false,
     errorMessage: String? = null,
+    /** Whether the current track is in Liked Music. Drives the filled/outline heart. */
+    isLiked: Boolean = false,
     onPlayPauseClick: () -> Unit = {},
     onPlayerClick: () -> Unit = {},
     onSwipeUp: () -> Unit = {},
     onNextClick: () -> Unit = {},
-    onPreviousClick: () -> Unit = {}
+    onPreviousClick: () -> Unit = {},
+    onLikeClick: () -> Unit = {},
+    onAddToPlaylistClick: () -> Unit = {}
 ) {
     var dragOffset by remember { mutableStateOf(0f) }
 
@@ -362,10 +369,50 @@ fun MiniPlayer(
                         )
                     }
 
-                    Spacer(modifier = Modifier.width(8.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
 
-                    // Plain Apple-style glyph on a 48dp touch target.
+                    // Like and Add-to-playlist sit left of transport. Both are hidden while the
+                    // track is still resolving, so the bar never offers an action on a song that
+                    // has not actually loaded.
                     if (!isLoading) {
+                        IconButton(
+                            onClick = onLikeClick,
+                            modifier = Modifier.size(40.dp)
+                        ) {
+                            Icon(
+                                imageVector = if (isLiked) {
+                                    Icons.Default.Favorite
+                                } else {
+                                    Icons.Default.FavoriteBorder
+                                },
+                                contentDescription = if (isLiked) {
+                                    "Remove from Liked Songs"
+                                } else {
+                                    "Add to Liked Songs"
+                                },
+                                // Filled heart takes the accent; the outline stays muted, so the
+                                // state reads at a glance without a label.
+                                tint = if (isLiked) {
+                                    MaterialTheme.colorScheme.primary
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                },
+                                modifier = Modifier.size(22.dp)
+                            )
+                        }
+
+                        IconButton(
+                            onClick = onAddToPlaylistClick,
+                            modifier = Modifier.size(40.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.PlaylistAdd,
+                                contentDescription = "Add to playlist",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(24.dp)
+                            )
+                        }
+
                         IconButton(
                             onClick = onPlayPauseClick,
                             modifier = Modifier.size(48.dp)

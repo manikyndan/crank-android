@@ -7,9 +7,12 @@ import com.crank.music.core.awaitOrNull
 import com.crank.music.domain.model.Album
 import com.crank.music.domain.model.Collection
 import com.crank.music.domain.model.Song
+import com.crank.music.data.local.SessionEntity
+import com.crank.music.data.local.SongDao
 import com.crank.music.domain.repository.MusicRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
@@ -18,6 +21,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import javax.inject.Inject
 
 data class GenreItem(
@@ -100,7 +104,8 @@ data class ExploreUiState(
 
 @HiltViewModel
 class ExploreViewModel @Inject constructor(
-    private val musicRepository: MusicRepository
+    private val musicRepository: MusicRepository,
+    private val songDao: SongDao,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(ExploreUiState())
@@ -108,8 +113,58 @@ class ExploreViewModel @Inject constructor(
 
     private var searchJob: Job? = null
 
+    companion object {
+        /** `session_values` key holding the epoch millis of the last successful Browse fetch. */
+        private const val LAST_FETCH_KEY = "browse_last_fetch_ms"
+
+        /**
+         * How long fetched Browse content counts as fresh. One day, so opening the tab surfaces the
+         * day's charts and releases instead of whatever happened to be cached.
+         */
+        private const val CACHE_TTL_MS = 24L * 60L * 60L * 1000L
+    }
+
+    /** False until this instance has content, so a re-entered tab is never blank but empty. */
+    private var hasLoadedThisInstance = false
+
     init {
-        loadExploreData()
+        refreshIfStale()
+    }
+
+    /**
+     * Fetches Browse content when it is missing or older than the one-day cache window.
+     *
+     * The tab used to load only from `init`, so after the first cold start its charts and releases
+     * never changed again until a manual pull-to-refresh. The fetch time is persisted in
+     * `session_values` rather than held in memory, because this ViewModel is scoped to the Browse
+     * nav entry — an in-memory stamp would reset on every tab switch and make the window useless.
+     *
+     * A fresh instance always loads even when the persisted stamp is recent, since it has no data
+     * of its own to show; the stamp is what stops a long-lived instance from going stale.
+     */
+    fun refreshIfStale(force: Boolean = false) {
+        if (_uiState.value.isLoading) return
+        viewModelScope.launch {
+            val lastFetch = readLastFetchTime()
+            val isStale = force ||
+                !hasLoadedThisInstance ||
+                lastFetch <= 0L ||
+                System.currentTimeMillis() - lastFetch >= CACHE_TTL_MS
+            if (isStale) loadExploreData()
+        }
+    }
+
+    private suspend fun readLastFetchTime(): Long = withContext(Dispatchers.IO) {
+        runCatching { songDao.getSessionValue(LAST_FETCH_KEY)?.toLongOrNull() ?: 0L }
+            .getOrDefault(0L)
+    }
+
+    private suspend fun recordFetchTime() = withContext(Dispatchers.IO) {
+        runCatching {
+            songDao.putSessionValue(
+                SessionEntity(key = LAST_FETCH_KEY, value = System.currentTimeMillis().toString())
+            )
+        }
     }
 
     private fun loadExploreData() {
@@ -178,6 +233,9 @@ class ExploreViewModel @Inject constructor(
                 _uiState.update { it.copy(trendingSearches = trending, isLoading = false) }
             }
             _uiState.update { it.copy(isLoading = false) }
+
+            hasLoadedThisInstance = true
+            recordFetchTime()
         }
     }
 

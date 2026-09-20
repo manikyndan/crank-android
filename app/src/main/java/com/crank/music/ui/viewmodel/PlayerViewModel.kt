@@ -20,6 +20,7 @@ import com.crank.music.data.remote.StreamResolver
 import com.crank.music.domain.model.DownloadState
 import com.crank.music.domain.model.DownloadStateResolver
 import com.crank.music.domain.model.Song
+import com.crank.music.ui.theme.isLight
 import com.crank.music.domain.repository.DownloadRepository
 import com.crank.music.domain.repository.MusicRepository
 import com.crank.music.service.RemoteControlBridge
@@ -77,8 +78,28 @@ class PlayerViewModel @Inject constructor(
     private val player: ExoPlayer,
     private val musicRepository: MusicRepository,
     private val songDao: SongDao,
-    private val downloadRepository: DownloadRepository
+    private val downloadRepository: DownloadRepository,
+    private val themePreference: com.crank.music.ui.theme.ThemePreference,
 ) : ViewModel() {
+
+    /**
+     * The current theme mode, so the player's overflow menu can label its Dark Mode row.
+     *
+     * Reuses the same [ThemePreference] the theme root reads, rather than a second copy — the
+     * menu and the applied theme can then never disagree.
+     */
+    val themeMode: StateFlow<com.crank.music.ui.viewmodel.ThemeMode?> = themePreference.mode
+
+    /** Flips between Light and Dark. `AUTO`/`OLED` resolve to a light/dark starting point. */
+    fun toggleDarkMode(systemInDarkTheme: Boolean) {
+        val current = themePreference.mode.value
+        val isDarkNow = current?.isLight(systemInDarkTheme)?.not() ?: systemInDarkTheme
+        viewModelScope.launch {
+            themePreference.setMode(
+                if (isDarkNow) ThemeMode.LIGHT else ThemeMode.DARK,
+            )
+        }
+    }
 
     private val _playerState = MutableStateFlow(PlayerState())
     val playerState: StateFlow<PlayerState> = _playerState.asStateFlow()
@@ -194,6 +215,14 @@ class PlayerViewModel @Inject constructor(
      */
     private var playQueue = PlayQueue()
 
+    /**
+     * How many tracks in a row have been skipped because they failed to load.
+     *
+     * Bounds the auto-skip so a queue where nothing resolves cannot spin forever — see
+     * [handlePlaybackFailure]. Reset to zero as soon as a track plays successfully.
+     */
+    private var consecutiveAutoSkips = 0
+
     private val playerListener = object : Player.Listener {
         override fun onIsPlayingChanged(isPlaying: Boolean) {
             _playerState.update { it.copy(isPlaying = isPlaying) }
@@ -215,13 +244,18 @@ class PlayerViewModel @Inject constructor(
         override fun onPlaybackStateChanged(playbackState: Int) {
             when (playbackState) {
                 Player.STATE_READY -> {
+                    val knownDuration = player.duration.coerceAtLeast(0L)
                     _playerState.update {
                         it.copy(
-                            duration = player.duration.coerceAtLeast(0L),
+                            duration = knownDuration,
                             isLoading = false,
                             errorMessage = null
                         )
                     }
+                    // The player is the first place the true running time is known. Rows that
+                    // reached the library without one get it recorded here, which is what replaces
+                    // the "—" in Liked Songs with a real duration.
+                    persistKnownDuration(knownDuration)
                 }
                 Player.STATE_BUFFERING -> {
                     _playerState.update { it.copy(isLoading = true) }
@@ -701,6 +735,42 @@ class PlayerViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Records the real running time on any stored row that arrived without one.
+     *
+     * Tracks from the Home feed are built without a parsed duration, so liking one straight from
+     * there saves it with `durationMs = 0` and the Liked Songs row renders "—" instead of "3:45".
+     * The player learns the true length on prepare — the first moment it is genuinely known — so
+     * this backfills rows already in the library as well as new ones, from real playback rather
+     * than an invented default.
+     *
+     * Only fills a blank: an existing non-zero duration is left alone, so a value the parser
+     * already got right is never overwritten by a re-resolve.
+     */
+    private fun persistKnownDuration(durationMs: Long) {
+        if (durationMs <= 0L) return
+        val song = _playerState.value.currentSong ?: return
+        if (song.durationMs > 0L) return
+
+        viewModelScope.launch {
+            try {
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    val existing = songDao.getSongById(song.id)
+                    if (existing != null && existing.durationMs <= 0L) {
+                        songDao.updateSong(existing.copy(durationMs = durationMs))
+                    }
+                }
+                // Keeps the on-screen track in step with the row, so the duration shows without
+                // waiting for the liked-list query to re-emit.
+                _playerState.update {
+                    it.copy(currentSong = it.currentSong?.copy(durationMs = durationMs))
+                }
+            } catch (e: Exception) {
+                Log.d("CRANK_PLAYER", "Could not record duration for ${song.id}: ${e.message}")
+            }
+        }
+    }
+
     private fun saveCurrentPlaybackPosition() {
         val song = _playerState.value.currentSong ?: return
         viewModelScope.launch {
@@ -814,6 +884,15 @@ class PlayerViewModel @Inject constructor(
          * already stale by the time the set is this large and clearing costs nothing.
          */
         private const val MAX_RETRY_TOKENS = 64
+
+        /**
+         * How many tracks in a row may be skipped automatically before playback gives up.
+         *
+         * Bounds [handlePlaybackFailure]: without it, a queue where every track fails would skip
+         * forever. Three is enough to step over a run of bad entries but short enough that a
+         * genuinely broken queue reports the error instead of churning.
+         */
+        private const val MAX_CONSECUTIVE_AUTO_SKIPS = 3
 
         /**
          * Separator for the queue snapshot.
@@ -977,6 +1056,10 @@ class PlayerViewModel @Inject constructor(
         // Record which attempt is now on the player, so a later 403 can be attributed to it.
         lastErrorToken = token
 
+        // A track started, so the auto-skip streak is broken. Without this, a long session with
+        // occasional failures would eventually trip the bound even though most tracks play.
+        consecutiveAutoSkips = 0
+
         _playerState.update {
             it.copy(
                 currentSong = song.copy(streamUrl = resolvedUrl),
@@ -994,6 +1077,42 @@ class PlayerViewModel @Inject constructor(
      * @see activePlayToken
      */
     private fun isSuperseded(token: Long): Boolean = token != activePlayToken
+
+    /**
+     * Reports a track that could not be played, advancing the queue when it is safe to.
+     *
+     * A single unresolvable track must not end the session — a queue that stops dead on one bad
+     * entry is the failure a listener actually notices, especially with the screen off and no way
+     * to intervene. So the default response is to move on to the next track.
+     *
+     * It is bounded, though: a queue where *nothing* resolves would otherwise skip forever. After
+     * [MAX_CONSECUTIVE_AUTO_SKIPS] failures in a row the error is surfaced and playback stops,
+     * which is the honest outcome. The counter is reset the moment a track plays, so a long
+     * session with occasional bad entries keeps skipping rather than tripping the bound.
+     */
+    private fun handlePlaybackFailure(token: Long, song: Song, cause: Throwable) {
+        // A newer play request has already taken over; this failure is stale and must not act.
+        if (isSuperseded(token)) return
+
+        if (consecutiveAutoSkips < MAX_CONSECUTIVE_AUTO_SKIPS && playQueue.peekNext() != null) {
+            consecutiveAutoSkips++
+            Log.w(
+                "CRANK_PLAYER",
+                "Skipping '${song.title}' (${song.id}) after load failure " +
+                    "($consecutiveAutoSkips/$MAX_CONSECUTIVE_AUTO_SKIPS): ${cause.message}",
+            )
+            playNext()
+            return
+        }
+
+        consecutiveAutoSkips = 0
+        _playerState.update {
+            it.copy(
+                isLoading = false,
+                errorMessage = "Failed to load: ${cause.message ?: "Unknown error"}",
+            )
+        }
+    }
 
     fun playSong(song: Song) {
         val requestId = playRequestCounter.incrementAndGet()
@@ -1017,14 +1136,7 @@ class PlayerViewModel @Inject constructor(
                 resolveAndPlay(song, token = token)
             } catch (e: Exception) {
                 Log.e("CRANK_PLAYER", "Failed to play ${song.title} (${song.id}): ${e.message}", e)
-                if (!isSuperseded(token)) {
-                    _playerState.update {
-                        it.copy(
-                            isLoading = false,
-                            errorMessage = "Failed to load: ${e.message ?: "Unknown error"}"
-                        )
-                    }
-                }
+                handlePlaybackFailure(token, song, e)
             }
         }
     }
@@ -1207,14 +1319,7 @@ class PlayerViewModel @Inject constructor(
                     resolveAndPlay(song, forceRefresh = true, reason = "Play", token = token)
                 } catch (e: Exception) {
                     Log.e("CRANK_PLAYER", "Failed to start '${song.title}': ${e.message}")
-                    if (!isSuperseded(token)) {
-                        _playerState.update {
-                            it.copy(
-                                isLoading = false,
-                                errorMessage = "Failed to load: ${e.message ?: "Unknown error"}"
-                            )
-                        }
-                    }
+                    handlePlaybackFailure(token, song, e)
                 }
             }
             return
@@ -1254,14 +1359,7 @@ class PlayerViewModel @Inject constructor(
                 resolveAndPlay(prevSong, reason = "Previous", token = token)
             } catch (e: Exception) {
                 Log.e("CRANK_PLAYER", "Failed to play previous: ${e.message}")
-                if (!isSuperseded(token)) {
-                    _playerState.update {
-                        it.copy(
-                            isLoading = false,
-                            errorMessage = "Failed to load: ${e.message ?: "Unknown error"}",
-                        )
-                    }
-                }
+                handlePlaybackFailure(token, prevSong, e)
             }
         }
     }
@@ -1381,6 +1479,16 @@ class PlayerViewModel @Inject constructor(
                     return@launch
                 }
 
+                if (result != null) {
+                    // Which branch produced these lyrics decides whether the screen may highlight
+                    // a line as "now singing". Logged because the two render very differently and
+                    // the difference is otherwise invisible without a debugger.
+                    Log.d(
+                        "CRANK_LYRICS",
+                        "Lyrics for '${song.title}': timing=${result.timing}, " +
+                            "lines=${result.lines.size}",
+                    )
+                }
                 _lyricsState.value =
                     if (result != null) {
                         LyricsState.Success(result.lines, result.timing)
@@ -1416,6 +1524,8 @@ class PlayerViewModel @Inject constructor(
      * regex silently dropped. See that class for the specific cases.
      */
     private suspend fun fetchLyricsFor(song: Song): ParsedLyrics? {
+        var fromExactSource: ParsedLyrics? = null
+
         // Exact source: needs a video id. A recognised-only track (and any track whose id is not
         // a YouTube id) has none, and asking would produce a browse id that resolves to nothing.
         if (song.id.isNotBlank() && song.isPlayable && !song.id.startsWith("http")) {
@@ -1432,11 +1542,29 @@ class PlayerViewModel @Inject constructor(
                 // The parser handles both, so there is no separate plain-text branch here — that
                 // duplication was how the two paths could disagree about timing.
                 val parsed = LyricsParser.parse(raw, song.durationMs)
-                if (!parsed.isEmpty) return parsed
+                if (!parsed.isEmpty) {
+                    // Real timings beat estimated ones, so a timed result wins outright.
+                    if (parsed.timing == LyricsTiming.SYNCED) return parsed
+
+                    // Plain text, though, is not the end of the search. Returning here on it is
+                    // what left the karaoke view unreachable for most tracks: YouTube Music very
+                    // often has the words without the timings, while LRCLIB frequently has the
+                    // same words WITH them. Hold this as a fallback and ask the other source.
+                    fromExactSource = parsed
+                }
             }
         }
 
-        return fetchLyricsFromLRCLIB(song.title, song.artistName, song.durationMs)
+        val fromFuzzy = fetchLyricsFromLRCLIB(song.title, song.artistName, song.durationMs)
+        return when {
+            fromFuzzy == null -> fromExactSource
+            // A timed match from the fuzzy source is still better than untimed text from the
+            // exact one — the whole point of the karaoke view is that it knows when each line is.
+            fromFuzzy.timing == LyricsTiming.SYNCED -> fromFuzzy
+            // Both untimed: prefer the exact source, whose title/artist match is not a guess.
+            fromExactSource != null -> fromExactSource
+            else -> fromFuzzy
+        }
     }
 
     private suspend fun fetchLyricsFromLRCLIB(

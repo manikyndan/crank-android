@@ -16,7 +16,7 @@ import androidx.room.RoomDatabase
         PlaybackPositionEntity::class,
         SessionEntity::class
     ],
-    version = 5,
+    version = 6,
     exportSchema = true
 )
 abstract class CrankDatabase : RoomDatabase() {

@@ -19,7 +19,6 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
@@ -40,6 +39,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.crank.music.domain.model.Album
 import com.crank.music.domain.model.Song
@@ -96,18 +96,13 @@ fun HomeScreen(
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(bottom = 100.dp),
-            verticalArrangement = Arrangement.spacedBy(26.dp)
+            verticalArrangement = Arrangement.spacedBy(32.dp)
         ) {
             item {
                 YtHomeHeader(
-                    notificationCount = if (notifState.hasUnread) notifState.unreadCount else 0,
                     onSearchClick = {
                         view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
                         onSearchClick()
-                    },
-                    onNotificationClick = {
-                        notificationViewModel.openPanel()
-                        view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
                     },
                     onProfileClick = {
                         view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
@@ -121,7 +116,7 @@ fun HomeScreen(
             if (feedState.isLoading && feedState.quickPicks.isEmpty()) {
                 item {
                     YtSectionHeader(title = "Quick picks")
-                    Spacer(modifier = Modifier.height(12.dp))
+                    Spacer(modifier = Modifier.height(16.dp))
                     YtLoadingRow()
                 }
             } else if (feedState.quickPicks.isNotEmpty()) {
@@ -134,11 +129,15 @@ fun HomeScreen(
                             }
                         },
                     )
-                    Spacer(modifier = Modifier.height(12.dp))
+                    Spacer(modifier = Modifier.height(16.dp))
                     YtHorizontalScrollSection(items = feedState.quickPicks) { song ->
-                        YtQuickPickCard(song = song, onClick = {
-                            onSongSelectWithContext(song, feedState.quickPicks)
-                        })
+                        YtQuickPickCard(
+                            song = song,
+                            onClick = { onSongSelectWithContext(song, feedState.quickPicks) },
+                            cardSize = 140.dp,
+                            titleSize = 15.sp,
+                            artistSize = 13.sp,
+                        )
                     }
                 }
             }
@@ -147,15 +146,19 @@ fun HomeScreen(
             if (feedState.isLoading && feedState.mixes.isEmpty()) {
                 item {
                     YtSectionHeader(title = "Mixed for you")
-                    Spacer(modifier = Modifier.height(12.dp))
-                    YtLoadingRow(cardWidth = 160, cardHeight = 160)
+                    Spacer(modifier = Modifier.height(16.dp))
+                    YtLoadingRow(cardWidth = 184, cardHeight = 184)
                 }
             } else if (feedState.mixes.isNotEmpty()) {
                 item {
                     YtSectionHeader(title = "Mixed for you")
-                    Spacer(modifier = Modifier.height(12.dp))
+                    Spacer(modifier = Modifier.height(16.dp))
                     YtHorizontalScrollSection(items = feedState.mixes) { mix ->
-                        YtMixCard(mix = mix, onClick = { onPlaylistClick(mix.id) })
+                        YtMixCard(
+                            mix = mix,
+                            onClick = { onPlaylistClick(mix.id) },
+                            cardSize = 184.dp,
+                        )
                     }
                 }
             }
@@ -164,13 +167,13 @@ fun HomeScreen(
             if (feedState.isLoading && feedState.recommendedAlbums.isEmpty()) {
                 item {
                     YtSectionHeader(title = "Recommended albums")
-                    Spacer(modifier = Modifier.height(12.dp))
-                    YtLoadingRow(cardWidth = 140, cardHeight = 140)
+                    Spacer(modifier = Modifier.height(16.dp))
+                    YtLoadingRow(cardWidth = 160, cardHeight = 160)
                 }
             } else if (feedState.recommendedAlbums.isNotEmpty()) {
                 item {
                     YtSectionHeader(title = "Recommended albums")
-                    Spacer(modifier = Modifier.height(12.dp))
+                    Spacer(modifier = Modifier.height(16.dp))
                     YtHorizontalScrollSection(items = feedState.recommendedAlbums) { album ->
                         YtAlbumCard(album = album, onClick = { onAlbumClick(album) })
                     }
@@ -181,7 +184,7 @@ fun HomeScreen(
             if (feedState.libraryPicks.isNotEmpty()) {
                 item {
                     YtSectionHeader(title = "Quick picks from your library")
-                    Spacer(modifier = Modifier.height(12.dp))
+                    Spacer(modifier = Modifier.height(16.dp))
                     YtHorizontalScrollSection(items = feedState.libraryPicks) { song ->
                         YtLibraryPickCard(song = song, onClick = {
                             onSongSelectWithContext(song, feedState.libraryPicks)
@@ -194,7 +197,7 @@ fun HomeScreen(
             if (feedState.similarArtists.isNotEmpty()) {
                 item {
                     YtSectionHeader(title = "Similar to artists you like")
-                    Spacer(modifier = Modifier.height(12.dp))
+                    Spacer(modifier = Modifier.height(16.dp))
                     YtHorizontalScrollSection(items = feedState.similarArtists) { artist ->
                         YtArtistCard(artist = artist, onClick = { onArtistClick(artist.name) })
                     }
@@ -205,17 +208,21 @@ fun HomeScreen(
             if (feedState.isLoading && feedState.newReleases.isEmpty()) {
                 item {
                     YtSectionHeader(title = "New releases for you")
-                    Spacer(modifier = Modifier.height(12.dp))
-                    YtLoadingRow(cardWidth = 140, cardHeight = 140)
+                    Spacer(modifier = Modifier.height(16.dp))
+                    YtLoadingRow(cardWidth = 160, cardHeight = 160)
                 }
             } else if (feedState.newReleases.isNotEmpty()) {
                 item {
                     YtSectionHeader(title = "New releases for you")
-                    Spacer(modifier = Modifier.height(12.dp))
+                    Spacer(modifier = Modifier.height(16.dp))
                     YtHorizontalScrollSection(items = feedState.newReleases) { song ->
-                        YtQuickPickCard(song = song, onClick = {
-                            onSongSelectWithContext(song, feedState.newReleases)
-                        })
+                        YtQuickPickCard(
+                            song = song,
+                            onClick = { onSongSelectWithContext(song, feedState.newReleases) },
+                            cardSize = 140.dp,
+                            titleSize = 15.sp,
+                            artistSize = 13.sp,
+                        )
                     }
                 }
             }
@@ -224,9 +231,13 @@ fun HomeScreen(
             if (feedState.recommendedPlaylists.isNotEmpty()) {
                 item {
                     YtSectionHeader(title = "Recommended playlists")
-                    Spacer(modifier = Modifier.height(12.dp))
+                    Spacer(modifier = Modifier.height(16.dp))
                     YtHorizontalScrollSection(items = feedState.recommendedPlaylists) { mix ->
-                        YtMixCard(mix = mix, onClick = { onPlaylistClick(mix.id) })
+                        YtMixCard(
+                            mix = mix,
+                            onClick = { onPlaylistClick(mix.id) },
+                            cardSize = 184.dp,
+                        )
                     }
                 }
             }
@@ -235,7 +246,7 @@ fun HomeScreen(
             feedState.recap?.let { recap ->
                 item {
                     YtSectionHeader(title = "Your recap")
-                    Spacer(modifier = Modifier.height(12.dp))
+                    Spacer(modifier = Modifier.height(16.dp))
                     HomeRecapCard(
                         recap = recap,
                         onPlay = { song -> onSongSelectWithContext(song, recap.topSongs) }
@@ -247,7 +258,7 @@ fun HomeScreen(
             if (feedState.moods.isNotEmpty()) {
                 item {
                     YtSectionHeader(title = "Moods & genres")
-                    Spacer(modifier = Modifier.height(12.dp))
+                    Spacer(modifier = Modifier.height(16.dp))
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -278,7 +289,7 @@ fun HomeScreen(
             if (feedState.continueListening.isNotEmpty()) {
                 item {
                     YtSectionHeader(title = "Continue listening")
-                    Spacer(modifier = Modifier.height(12.dp))
+                    Spacer(modifier = Modifier.height(16.dp))
                     YtHorizontalScrollSection(items = feedState.continueListening) { song ->
                         YtContinueCard(
                             song = song,
@@ -295,13 +306,13 @@ fun HomeScreen(
             if (feedState.isLoading && feedState.trending.isEmpty()) {
                 item {
                     YtSectionHeader(title = "Trending")
-                    Spacer(modifier = Modifier.height(12.dp))
+                    Spacer(modifier = Modifier.height(16.dp))
                     YtLoadingRow(cardWidth = 280, cardHeight = 64)
                 }
             } else if (feedState.trending.isNotEmpty()) {
                 item {
                     YtSectionHeader(title = "Trending")
-                    Spacer(modifier = Modifier.height(12.dp))
+                    Spacer(modifier = Modifier.height(16.dp))
                     YtHorizontalScrollSection(items = feedState.trending) { entry ->
                         YtTrendingCard(entry = entry, onClick = {
                             onSongSelectWithContext(
@@ -341,12 +352,19 @@ fun HomeScreen(
     }
 }
 
-/** YouTube Music home header: title left; search, bell, profile right. */
+/**
+ * Home top bar: a time-based greeting on the left, then search, refresh and profile on the right.
+ *
+ * The large "Home" wordmark is gone. The greeting takes the title slot at the same type scale as a
+ * section header ("Quick picks"), and "Home" drops to a muted line beneath it — so the bar reads as
+ * content chrome instead of a page title competing with the feed below.
+ *
+ * The bell was removed outright rather than hidden; refresh sits immediately left of the profile
+ * disc, which is now the last item and therefore the top-right corner.
+ */
 @Composable
 private fun YtHomeHeader(
-    notificationCount: Int,
     onSearchClick: () -> Unit,
-    onNotificationClick: () -> Unit,
     onProfileClick: () -> Unit,
     onRefresh: () -> Unit,
 ) {
@@ -356,12 +374,24 @@ private fun YtHomeHeader(
             .padding(start = 20.dp, end = 12.dp, top = 16.dp, bottom = 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Text(
-            text = "Home",
-            style = MaterialTheme.typography.headlineLarge.copy(fontWeight = FontWeight.Bold),
-            color = MaterialTheme.colorScheme.onSurface,
-            modifier = Modifier.weight(1f),
-        )
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = timeBasedGreeting(),
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold,
+                fontSize = 19.sp,
+                color = MaterialTheme.colorScheme.onBackground,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = "Home",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
 
         IconButton(
             onClick = onSearchClick,
@@ -375,28 +405,16 @@ private fun YtHomeHeader(
             )
         }
 
-        Box {
-            IconButton(
-                onClick = onNotificationClick,
-                modifier = Modifier.size(40.dp)
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Notifications,
-                    contentDescription = "Notifications",
-                    tint = MaterialTheme.colorScheme.onSurface,
-                    modifier = Modifier.size(22.dp)
-                )
-            }
-            if (notificationCount > 0) {
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.TopEnd)
-                        .padding(top = 8.dp, end = 8.dp)
-                        .size(7.dp)
-                        .clip(CircleShape)
-                        .background(MaterialTheme.colorScheme.primary)
-                )
-            }
+        IconButton(
+            onClick = onRefresh,
+            modifier = Modifier.size(40.dp)
+        ) {
+            Icon(
+                imageVector = Icons.Default.Refresh,
+                contentDescription = "Refresh",
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(22.dp)
+            )
         }
 
         // Profile disc. There is no avatar backend, so a person glyph stands
@@ -418,18 +436,21 @@ private fun YtHomeHeader(
                 )
             }
         }
+    }
+}
 
-        IconButton(
-            onClick = onRefresh,
-            modifier = Modifier.size(40.dp)
-        ) {
-            Icon(
-                imageVector = Icons.Default.Refresh,
-                contentDescription = "Refresh",
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.size(22.dp)
-            )
-        }
+/**
+ * "Good Morning" before noon, "Good Afternoon" through to 5 PM, "Good Evening" after it.
+ *
+ * Read from the device clock at composition time rather than cached, so the greeting follows the
+ * user's day without needing a re-entry or a refresh.
+ */
+private fun timeBasedGreeting(): String {
+    val hour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
+    return when {
+        hour < 12 -> "Good Morning"
+        hour < 17 -> "Good Afternoon"
+        else -> "Good Evening"
     }
 }
 
@@ -468,7 +489,7 @@ private fun HomeRecapCard(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(16.dp))
             recap.topSongs.take(5).forEachIndexed { index, song ->
                 HomeRecapRow(rank = index + 1, song = song, onClick = { onPlay(song) })
             }

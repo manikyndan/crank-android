@@ -130,7 +130,8 @@ class InnerTubeApi @Inject constructor(
                                 durationMs = durationMs,
                                 artworkUrl = artworkUrl,
                                 isLocal = false,
-                                streamUrl = videoId
+                                streamUrl = videoId,
+                                isExplicit = parseExplicit(listItem)
                             )
                         )
                     }
@@ -515,10 +516,16 @@ class InnerTubeApi @Inject constructor(
                     title = title,
                     artistName = artistName,
                     albumId = albumId,
+                    // Best-effort album name: the third non-blank flex column of a track row inside
+                    // an album/playlist shelf is the album (or the playlist) name. Empty for rows
+                    // that carry only title + artist, which is why it stays nullable rather than a
+                    // fabricated string.
+                    albumName = columnTexts(track).getOrNull(2),
                     durationMs = durationMs,
                     artworkUrl = artworkUrl,
                     isLocal = false,
-                    streamUrl = videoId
+                    streamUrl = videoId,
+                    isExplicit = parseExplicit(track)
                 )
             )
         }
@@ -603,6 +610,31 @@ class InnerTubeApi @Inject constructor(
             ?: "Unknown Artist"
 
         return Triple(title, artistName, durationMs)
+    }
+
+    /**
+     * The non-blank text of each flex column, left to right.
+     *
+     * Skipping blanks matters because a row with no artist still emits an empty column, and
+     * indexing into the raw array would then read the album as the artist.
+     */
+    /**
+     * True when [listItem] carries InnerTube's explicit badge.
+     *
+     * The badge lives in the row's `badges` array as a `musicInlineBadgeRenderer` whose
+     * `icon.iconType` is `MUSIC_EXPLICIT_BADGE`. Read directly rather than inferred: inventing an
+     * explicit flag would put a false warning on clean tracks, which is worse than missing one.
+     */
+    private fun parseExplicit(listItem: JsonObject): Boolean {
+        val badges = listItem["badges"]?.jsonArray ?: return false
+        for (badge in badges) {
+            val iconType = badge.jsonObject
+                .get("musicInlineBadgeRenderer")?.jsonObject
+                ?.get("icon")?.jsonObject
+                ?.get("iconType")?.jsonPrimitive?.content ?: continue
+            if (iconType == "MUSIC_EXPLICIT_BADGE") return true
+        }
+        return false
     }
 
     /**

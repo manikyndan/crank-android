@@ -30,6 +30,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -80,6 +81,12 @@ fun ExploreScreen(
 ) {
     val uiState by exploreViewModel.uiState.collectAsState()
     val view = LocalView.current
+
+    // Re-checked every time the tab is opened: content older than a day is refetched, so Browse
+    // shows current charts without the user having to pull to refresh.
+    LaunchedEffect(Unit) {
+        exploreViewModel.refreshIfStale()
+    }
 
     fun haptic() = view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
 

@@ -20,6 +20,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.MusicNote
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.SearchOff
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -148,10 +149,13 @@ fun SearchScreen(
                     }
                 } else {
                     item {
+                        // No catalogue attribution here: the screen is a search field, not a
+                        // place to explain where the content comes from. The copy just invites the
+                        // action.
                         EmptyState(
-                            icon = Icons.Default.SearchOff,
+                            icon = Icons.Default.Search,
                             title = "Search Crank Music",
-                            message = "Find songs, artists and albums from the YouTube Music catalogue."
+                            message = "Start typing to find songs, artists and albums."
                         )
                     }
                 }

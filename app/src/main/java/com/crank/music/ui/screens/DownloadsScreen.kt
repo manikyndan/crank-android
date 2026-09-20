@@ -14,7 +14,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -36,7 +36,6 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import com.crank.music.domain.model.DownloadState
 import com.crank.music.domain.model.Song
 import com.crank.music.ui.components.DownloadIndicator
-import com.crank.music.ui.components.SongRow
 import com.crank.music.ui.theme.ChampagneGold
 import com.crank.music.ui.theme.CharcoalElevated
 import com.crank.music.ui.theme.CharcoalSurface
@@ -141,15 +140,27 @@ fun DownloadsScreen(
             contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            items(uiState.downloadedSongs) { song ->
+            itemsIndexed(
+                items = uiState.downloadedSongs,
+                key = { _, song -> song.id },
+            ) { index, song ->
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Box(modifier = Modifier.weight(1f)) {
-                        SongRow(
+                        // Deliberately the same row as Liked Songs — number/artwork/title/
+                        // artist/album/duration — so the two Library lists read as one design
+                        // rather than two. No 3-dot here: this screen has no per-row menu, and a
+                        // button that does nothing is worse than no button.
+                        LikedTrackRow(
+                            index = index,
                             song = song,
-                            onClick = { onSongSelect(song) }
+                            isCurrent = false,
+                            isPlaying = false,
+                            onClick = { onSongSelect(song) },
+                            onMoreClick = {},
+                            showMoreButton = false,
                         )
                     }
                     Spacer(modifier = Modifier.width(8.dp))

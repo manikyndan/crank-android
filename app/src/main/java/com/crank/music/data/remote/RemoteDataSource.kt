@@ -29,7 +29,8 @@ data class ITunesTrackDto(
     @SerialName("artworkUrl100") val artworkUrl100: String? = null,
     @SerialName("previewUrl") val previewUrl: String? = null,
     @SerialName("releaseDate") val releaseDate: String? = null,
-    @SerialName("trackCount") val trackCount: Int? = null
+    @SerialName("trackCount") val trackCount: Int? = null,
+    @SerialName("trackExplicitness") val trackExplicitness: String? = null
 )
 
 interface RemoteDataSource {
@@ -113,6 +114,11 @@ class RemoteDataSourceImpl @Inject constructor(
             title = name,
             artistName = artistName ?: "Unknown Artist",
             albumId = collectionId?.toString(),
+            // Real album name from the iTunes collection, not a browse id: the Liked Songs
+            // subtitle can show "Artist • Album" without a second lookup.
+            albumName = collectionName,
+            // iTunes reports "explicit" / "cleaned" / "notExplicit"; only the first is explicit.
+            isExplicit = trackExplicitness == "explicit",
             // Unknown, not invented: a default of three minutes renders as "3:00" for every track
             // and cannot be distinguished from a real duration.
             durationMs = trackTimeMillis ?: 0L,

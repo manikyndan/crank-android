@@ -1,10 +1,13 @@
 package com.crank.music.ui.viewmodel
 
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import com.crank.music.data.local.SettingsStore
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 enum class StreamQuality(val label: String, val kbps: String, val dataPerHour: String, val isHighUsage: Boolean) {
@@ -51,21 +54,62 @@ data class AudioQualityState(
 )
 
 @HiltViewModel
-class AudioQualityViewModel @Inject constructor() : ViewModel() {
+class AudioQualityViewModel @Inject constructor(
+    private val settingsStore: SettingsStore,
+) : ViewModel() {
 
     private val _uiState = MutableStateFlow(AudioQualityState())
     val uiState: StateFlow<AudioQualityState> = _uiState.asStateFlow()
 
+    init {
+        // Restore the persisted choices. These used to reset on every screen visit, which made the
+        // whole screen feel broken — you pick Lossless, come back, and it says High again.
+        viewModelScope.launch {
+            val mobile = settingsStore.getString(
+                SettingsStore.MOBILE_QUALITY,
+                AudioQualityState().mobileQuality.name,
+            )
+            val wifi = settingsStore.getString(
+                SettingsStore.WIFI_QUALITY,
+                AudioQualityState().wifiQuality.name,
+            )
+            val download = settingsStore.getString(
+                SettingsStore.DOWNLOAD_QUALITY,
+                AudioQualityState().downloadQuality.name,
+            )
+            val dataSaver = settingsStore.getBoolean(SettingsStore.DATA_SAVER, false)
+
+            _uiState.value = _uiState.value.copy(
+                mobileQuality = mobile.toQualityOrNull() ?: _uiState.value.mobileQuality,
+                wifiQuality = wifi.toQualityOrNull() ?: _uiState.value.wifiQuality,
+                downloadQuality = download.toQualityOrNull() ?: _uiState.value.downloadQuality,
+                dataSaverEnabled = dataSaver,
+            )
+        }
+    }
+
+    /** Enum names are the stored form; an unknown value falls back to the caller's default. */
+    private fun String.toQualityOrNull(): StreamQuality? =
+        StreamQuality.entries.firstOrNull { it.name == this }
+
     fun setMobileQuality(quality: StreamQuality) {
         _uiState.value = _uiState.value.copy(mobileQuality = quality)
+        persist { settingsStore.putString(SettingsStore.MOBILE_QUALITY, quality.name) }
     }
 
     fun setWifiQuality(quality: StreamQuality) {
         _uiState.value = _uiState.value.copy(wifiQuality = quality)
+        persist { settingsStore.putString(SettingsStore.WIFI_QUALITY, quality.name) }
     }
 
     fun setDownloadQuality(quality: StreamQuality) {
         _uiState.value = _uiState.value.copy(downloadQuality = quality)
+        persist { settingsStore.putString(SettingsStore.DOWNLOAD_QUALITY, quality.name) }
+    }
+
+    /** Fire-and-forget write; a failed persist must never block the UI update. */
+    private fun persist(block: suspend () -> Unit) {
+        viewModelScope.launch { runCatching { block() } }
     }
 
     fun toggleQualityBadge() {
@@ -94,10 +138,16 @@ class AudioQualityViewModel @Inject constructor() : ViewModel() {
 
     fun toggleDataSaver() {
         val newState = !_uiState.value.dataSaverEnabled
+        // Data saver genuinely changes behaviour: it forces the lowest mobile bitrate, which is
+        // the whole point of the toggle. Both the flag and the resulting quality are persisted.
         _uiState.value = _uiState.value.copy(
             dataSaverEnabled = newState,
             mobileQuality = if (newState) StreamQuality.LOW else StreamQuality.HIGH
         )
+        persist {
+            settingsStore.putBoolean(SettingsStore.DATA_SAVER, newState)
+            settingsStore.putString(SettingsStore.MOBILE_QUALITY, _uiState.value.mobileQuality.name)
+        }
     }
 
     fun toggleFormatsExpanded() {

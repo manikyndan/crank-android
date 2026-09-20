@@ -1,11 +1,14 @@
 package com.crank.music.data.remote
 
 import android.util.Log
+import com.crank.music.data.remote.innertube.ClientAttempt
 import com.crank.music.data.remote.innertube.StreamCascadeResolver
 import com.crank.music.data.remote.innertube.StreamUnavailableException
 import com.crank.music.data.remote.potoken.PoTokenGenerator
+import java.io.IOException
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlinx.coroutines.delay
 
 /** A resolved, directly playable stream. */
 data class StreamData(
@@ -91,34 +94,113 @@ class StreamResolver @Inject constructor(
             )
         }
 
+        return resolveWithRetry(videoId, songTitle, artistName)
+    }
+
+    /**
+     * Walks the cascade, retrying the whole chain when it fails for a *transient* reason.
+     *
+     * A screen-off transition (or a brief network handover) can stall DNS just long enough for
+     * every client in the chain to die on a transport error, which used to surface immediately as
+     * "No playable stream … UnknownHostException". Those failures are environmental and usually
+     * clear within a second, so the chain is worth re-running rather than reported as a dead track.
+     *
+     * Only retries transient failures. A definitive refusal — `UNPLAYABLE`, `LOGIN_REQUIRED`,
+     * `NO_FORMATS`, `TOKEN_MISSING` — is a stable answer about the track or the build, and
+     * hammering it three times would just delay the honest error and waste requests.
+     *
+     * Backoff is linear and short (the first retry is the one that matters), and the whole thing is
+     * bounded so a genuinely offline device fails fast instead of hanging the player.
+     */
+    private suspend fun resolveWithRetry(
+        videoId: String,
+        songTitle: String,
+        artistName: String,
+    ): StreamData {
         val visitorData = runCatching { visitorDataProvider.visitorData() }.getOrNull()
         val dataSyncId = visitorDataProvider.dataSyncId()
         val isLoggedIn = dataSyncId != null
 
-        val resolution =
-            cascadeResolver.resolve(
-                videoId = videoId,
-                visitorData = visitorData,
-                dataSyncId = dataSyncId,
-                isLoggedIn = isLoggedIn,
-            )
+        var lastFailure: StreamUnavailableException? = null
 
-        Log.d(
-            TAG,
-            "Resolved $videoId via ${resolution.client.label} " +
-                "(expires=${resolution.expiresInSeconds}s, pot=${resolution.hasPoToken})",
-        )
+        for (attempt in 1..MAX_RESOLVE_ATTEMPTS) {
+            try {
+                val resolution = cascadeResolver.resolve(
+                    videoId = videoId,
+                    visitorData = visitorData,
+                    dataSyncId = dataSyncId,
+                    isLoggedIn = isLoggedIn,
+                )
 
-        return StreamData(
-            url = resolution.url,
-            headers = MEDIA_HEADERS,
-            expiresInSeconds = resolution.expiresInSeconds,
-            sourceClient = resolution.client.label,
-        )
+                Log.d(
+                    TAG,
+                    "Resolved $videoId via ${resolution.client.label} " +
+                        "(expires=${resolution.expiresInSeconds}s, pot=${resolution.hasPoToken}" +
+                        if (attempt > 1) ", attempt=$attempt" else "" + ")",
+                )
+
+                return StreamData(
+                    url = resolution.url,
+                    headers = MEDIA_HEADERS,
+                    expiresInSeconds = resolution.expiresInSeconds,
+                    sourceClient = resolution.client.label,
+                )
+            } catch (e: StreamUnavailableException) {
+                lastFailure = e
+                if (!e.isTransient() || attempt == MAX_RESOLVE_ATTEMPTS) throw e
+                Log.w(
+                    TAG,
+                    "Attempt $attempt/$MAX_RESOLVE_ATTEMPTS for $videoId failed transiently " +
+                        "(${e.attempts.joinToString()}); retrying in ${RETRY_DELAY_MS * attempt}ms",
+                )
+                delay(RETRY_DELAY_MS * attempt)
+            } catch (e: IOException) {
+                // A DNS/socket failure can escape the cascade without being wrapped, because the
+                // very first request never reaches the point where a client attempt is recorded.
+                if (attempt == MAX_RESOLVE_ATTEMPTS) {
+                    throw StreamUnavailableException(
+                        videoId = videoId,
+                        attempts = emptyList(),
+                        hint = "Network error while resolving: ${e.message ?: e.javaClass.simpleName}",
+                    )
+                }
+                Log.w(
+                    TAG,
+                    "Attempt $attempt/$MAX_RESOLVE_ATTEMPTS for $videoId hit a network error " +
+                        "(${e.message}); retrying in ${RETRY_DELAY_MS * attempt}ms",
+                )
+                delay(RETRY_DELAY_MS * attempt)
+            }
+        }
+
+        // Unreachable: the loop either returns or throws on its final iteration.
+        throw lastFailure
+            ?: StreamUnavailableException(videoId, emptyList(), hint = "Resolution produced no result.")
     }
+
+    /**
+     * True when the failure is environmental rather than a statement about the track.
+     *
+     * A transport/decode error on any client means the request itself did not complete — the
+     * signature of a stalled or dropped network — so the chain is worth re-running.
+     */
+    private fun StreamUnavailableException.isTransient(): Boolean =
+        attempts.any { it.outcome == ClientAttempt.Outcome.ERROR }
 
     companion object {
         private const val TAG = "CRANK_STREAM"
+
+        /**
+         * How many times the whole cascade is walked before giving up.
+         *
+         * Three is deliberate: the first retry absorbs the common screen-off / handover stall, the
+         * second covers a slower reconnection, and beyond that the device is genuinely offline and
+         * the user should see the error rather than wait.
+         */
+        private const val MAX_RESOLVE_ATTEMPTS = 3
+
+        /** Base backoff between attempts. Linear (×attempt), so 400ms then 800ms. */
+        private const val RETRY_DELAY_MS = 400L
 
         /**
          * Headers sent when fetching media from the CDN.

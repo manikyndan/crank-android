@@ -1,6 +1,8 @@
 package com.crank.music.di
 
+import android.app.PendingIntent
 import android.content.Context
+import android.content.Intent
 import androidx.annotation.OptIn
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
@@ -12,6 +14,7 @@ import androidx.media3.datasource.cache.CacheDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.session.MediaSession
+import com.crank.music.MainActivity
 import com.crank.music.service.CrankSessionCallback
 import dagger.Module
 import dagger.Provides
@@ -66,6 +69,18 @@ object PlayerModule {
             .setAudioAttributes(audioAttributes, true)
             .setHandleAudioBecomingNoisy(true)
             .setMediaSourceFactory(mediaSourceFactory)
+            // Hold a partial wake lock for as long as the player is playing *or* buffering.
+            //
+            // This is the fix for playback dying when the screen turns off. ExoPlayer defaults to
+            // WAKE_MODE_NONE, so the moment the screen went dark the CPU was free to suspend: the
+            // foreground service kept the process alive, but in-flight socket reads (and the DNS
+            // lookup of the CDN host behind them) were frozen mid-request and surfaced as
+            // "UnknownHostException". WAKE_MODE_NETWORK keeps the CPU up exactly while there is
+            // network work to do, and releases it otherwise — it does not pin the device awake
+            // while merely paused.
+            //
+            // Needs android.permission.WAKE_LOCK, declared in the manifest.
+            .setWakeMode(C.WAKE_MODE_NETWORK)
             .build()
     }
 
@@ -75,8 +90,24 @@ object PlayerModule {
         @ApplicationContext context: Context,
         player: ExoPlayer
     ): MediaSession {
+        // Tapping the notification or the lock-screen player opens the app rather than doing
+        // nothing. Without a session activity, Media3 posts the notification with no content
+        // intent and the panel feels dead when tapped.
+        //
+        // SINGLE_TOP + CLEAR_TOP so an already-running app is brought forward instead of being
+        // recreated — a second instance would fight the first over the single MediaSession.
+        val sessionActivity = PendingIntent.getActivity(
+            context,
+            0,
+            Intent(context, MainActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            },
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
+
         return MediaSession.Builder(context, player)
             .setCallback(CrankSessionCallback)
+            .setSessionActivity(sessionActivity)
             .build()
     }
 }

@@ -16,7 +16,9 @@ data class LocalSongEntity(
     val isLocal: Boolean,
     val streamUrl: String = "",
     val isLiked: Boolean = false,
-    val dateAdded: Long = System.currentTimeMillis()
+    val dateAdded: Long = System.currentTimeMillis(),
+    val albumName: String? = null,
+    val isExplicit: Boolean = false
 )
 
 fun LocalSongEntity.toDomainModel(): Song {
@@ -25,6 +27,8 @@ fun LocalSongEntity.toDomainModel(): Song {
         title = title,
         artistName = artistName,
         albumId = albumId,
+        albumName = albumName,
+        isExplicit = isExplicit,
         durationMs = durationMs,
         artworkUrl = artworkUrl,
         isLocal = isLocal,
@@ -38,6 +42,8 @@ fun Song.toEntity(isLiked: Boolean = false, dateAdded: Long = System.currentTime
         title = title,
         artistName = artistName,
         albumId = albumId,
+        albumName = albumName,
+        isExplicit = isExplicit,
         durationMs = durationMs,
         artworkUrl = artworkUrl,
         isLocal = isLocal,

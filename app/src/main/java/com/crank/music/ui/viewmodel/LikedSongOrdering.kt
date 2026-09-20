@@ -25,10 +25,9 @@ enum class LikedSort(val label: String) {
  * rather than only through the screen. The screen is the hard part to exercise — it needs a
  * device, a database and a real liked set — while this needs none of them.
  *
- * The filter matches title, artist and album. Album is matched against `albumId` because that is
- * the only album field [Song] carries: it holds a browseId, not a display name, so searching for
- * a typed album *name* will not match. That is a limitation of the model, not of this filter, and
- * is noted rather than papered over with a fabricated name.
+ * The filter matches title, artist and album. Album is matched against `albumName` when the
+ * source provided one, and falls back to `albumId` (a browse id) for tracks that have no display
+ * name — so a typed album *name* matches where known, and the id still matches for the rest.
  *
  * Ordering is stable and case-insensitive for the text sorts, so two songs by the same artist
  * keep their relative recency instead of shuffling on every recomposition.
@@ -46,6 +45,7 @@ internal fun filterAndSortLikedSongs(
         songs.filter { song ->
             song.title.contains(trimmed, ignoreCase = true) ||
                 song.artistName.contains(trimmed, ignoreCase = true) ||
+                song.albumName?.contains(trimmed, ignoreCase = true) == true ||
                 song.albumId?.contains(trimmed, ignoreCase = true) == true
         }
     }
@@ -55,10 +55,11 @@ internal fun filterAndSortLikedSongs(
         LikedSort.RECENCY -> filtered
         LikedSort.TITLE -> filtered.sortedBy { it.title.lowercase() }
         LikedSort.ARTIST -> filtered.sortedBy { it.artistName.lowercase() }
-        // Grouping by albumId at least keeps tracks from one album adjacent to each other. The
-        // order *between* albums is by id and therefore arbitrary, which is the honest best
-        // available without an album name on the model.
-        LikedSort.ALBUM -> filtered.sortedBy { it.albumId.orEmpty() }
+        // Sort by the album display name when present, falling back to albumId so tracks that
+        // only have a browse id still group together instead of scattering.
+        LikedSort.ALBUM -> filtered.sortedBy {
+            (it.albumName ?: it.albumId).orEmpty().lowercase()
+        }
         LikedSort.DURATION -> filtered.sortedBy { it.durationMs }
     }
 }

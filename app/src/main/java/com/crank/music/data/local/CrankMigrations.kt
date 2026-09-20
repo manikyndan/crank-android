@@ -134,10 +134,28 @@ val MIGRATION_4_5 = object : Migration(4, 5) {
     }
 }
 
+/**
+ * v5 → v6
+ *
+ * Adds `albumName` and `isExplicit` to `songs`, so the Liked Songs screen can show a real
+ * "Artist • Album" subtitle and an explicit badge without a per-row network lookup.
+ *
+ * Both are purely additive and default to the "unknown" state: `albumName` is nullable (a track
+ * discovered via search has no album name) and `isExplicit` defaults to 0 (the common case). No
+ * existing row is touched beyond the two new columns, so likes, history and playlists all survive.
+ */
+val MIGRATION_5_6 = object : Migration(5, 6) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE `songs` ADD COLUMN `albumName` TEXT")
+        db.execSQL("ALTER TABLE `songs` ADD COLUMN `isExplicit` INTEGER NOT NULL DEFAULT 0")
+    }
+}
+
 /** Every migration the database understands, in ascending order. */
 val CRANK_MIGRATIONS: Array<Migration> = arrayOf(
     MIGRATION_1_2,
     MIGRATION_2_3,
     MIGRATION_3_4,
-    MIGRATION_4_5
+    MIGRATION_4_5,
+    MIGRATION_5_6
 )
