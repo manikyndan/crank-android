@@ -53,7 +53,7 @@ class UpdateNotificationHelper @Inject constructor(
         )
 
         val notification = NotificationCompat.Builder(context, CHANNEL_ID)
-            .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle("Update Available")
             .setContentText("Crank Music v$versionName is ready to install")
             .setStyle(NotificationCompat.BigTextStyle()
@@ -78,7 +78,7 @@ class UpdateNotificationHelper @Inject constructor(
         )
 
         val notification = NotificationCompat.Builder(context, CHANNEL_ID)
-            .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle("Download Complete")
             .setContentText("Update is ready to install")
             .setPriority(NotificationCompat.PRIORITY_HIGH)
@@ -91,7 +91,7 @@ class UpdateNotificationHelper @Inject constructor(
 
     fun showInstallSuccess() {
         val notification = NotificationCompat.Builder(context, CHANNEL_ID)
-            .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle("Update Installed")
             .setContentText("Crank Music has been updated successfully!")
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)

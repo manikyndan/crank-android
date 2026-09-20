@@ -173,14 +173,14 @@ fun SettingsScreen(
                 ) {
                     Icon(
                         imageVector = Icons.Default.Info,
-                        contentDescription = "About CRANK",
+                        contentDescription = "About Crank Music",
                         tint = ChampagneGold,
                         modifier = Modifier.size(22.dp)
                     )
                     Spacer(modifier = Modifier.width(14.dp))
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = "About CRANK",
+                            text = "About Crank Music",
                             style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Medium),
                             color = WarmWhite
                         )

@@ -1,5 +1,6 @@
 <resources>
-    <string name="app_name">Crank</string>
+    <!-- The launcher label. Spelled "Crank Music" (the request had a typo). -->
+    <string name="app_name">Crank Music</string>
     <string name="crank_app_name">CRANK</string>
     <string name="crank_tagline">TURN UP YOUR WORLD</string>
     <string name="crank_music_box_desc">Crank vintage music box illustration</string>

@@ -686,7 +686,7 @@ fun NowPlayingScreen(
                                 type = "text/plain"
                                 putExtra(
                                     Intent.EXTRA_TEXT,
-                                    "Listening to \"${it.title}\" by ${it.artistName} on Crank"
+                                    "Listening to \"${it.title}\" by ${it.artistName} on Crank Music"
                                 )
                             }
                             context.startActivity(Intent.createChooser(intent, null))

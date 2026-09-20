@@ -150,7 +150,7 @@ fun SearchScreen(
                     item {
                         EmptyState(
                             icon = Icons.Default.SearchOff,
-                            title = "Search Crank",
+                            title = "Search Crank Music",
                             message = "Find songs, artists and albums from the YouTube Music catalogue."
                         )
                     }
