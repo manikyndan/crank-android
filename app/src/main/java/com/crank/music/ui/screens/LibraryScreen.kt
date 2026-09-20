@@ -110,6 +110,8 @@ import com.crank.music.ui.viewmodel.toDomainModel
 fun LibraryScreen(
     libraryViewModel: LibraryViewModel = hiltViewModel(),
     onSongSelect: (Song) -> Unit = {},
+    /** Opens the dedicated Liked Songs destination. */
+    onLikedMusicClick: () -> Unit = {},
     onPlaylistClick: (String) -> Unit = {},
     onSmartPlaylistClick: (String) -> Unit = onPlaylistClick,
     onArtistClick: (String) -> Unit = {},
@@ -205,7 +207,11 @@ fun LibraryScreen(
                                 title = "Liked Music",
                                 subtitle = "Playlist • ${countSongs(likedCount)}",
                                 onClick = {
-                                    libraryViewModel.selectSection(LibrarySection.SONGS)
+                                    // Opens the dedicated Liked Songs screen. This used to call
+                                    // selectSection(SONGS), which only re-filtered the Library in
+                                    // place — so there was no Liked screen to navigate to and the
+                                    // row could not take you anywhere the tab row did not.
+                                    onLikedMusicClick()
                                     haptic()
                                 }
                             )

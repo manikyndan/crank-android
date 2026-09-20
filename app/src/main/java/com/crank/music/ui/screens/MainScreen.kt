@@ -39,7 +39,7 @@ fun MainScreen(
     val playerState by playerViewModel.playerState.collectAsState()
     val song = playerState.currentSong
 
-    val isFullscreenRoute = currentRoute == "now_playing" || currentRoute == "settings" || currentRoute == "appearance" || currentRoute == "privacy_security" || currentRoute == "offline_music" || currentRoute == "update_checker" || currentRoute == "playback_settings" || currentRoute == "audio_quality" || currentRoute == "crank_ai" || currentRoute == "equalizer" || currentRoute == "music_dna" || currentRoute == "downloads" || currentRoute == "queue" || currentRoute == "lyrics" || currentRoute == "recognition" || currentRoute.startsWith("playlist_detail") || currentRoute.startsWith("album_detail") || currentRoute.startsWith("artist_detail")
+    val isFullscreenRoute = currentRoute == "now_playing" || currentRoute == "settings" || currentRoute == "appearance" || currentRoute == "privacy_security" || currentRoute == "offline_music" || currentRoute == "update_checker" || currentRoute == "playback_settings" || currentRoute == "audio_quality" || currentRoute == "crank_ai" || currentRoute == "equalizer" || currentRoute == "music_dna" || currentRoute == "downloads" || currentRoute == "queue" || currentRoute == "lyrics" || currentRoute == "recognition" || currentRoute == "liked_music" || currentRoute.startsWith("playlist_detail") || currentRoute.startsWith("album_detail") || currentRoute.startsWith("artist_detail")
 
     Scaffold(
         modifier = Modifier.fillMaxSize(),
@@ -239,6 +239,9 @@ fun MainScreen(
                     onSongSelect = { selectedSong ->
                         playerViewModel.playSong(selectedSong)
                     },
+                    onLikedMusicClick = {
+                        navController.navigate("liked_music")
+                    },
                     onPlaylistClick = { playlistId ->
                         navController.navigate("playlist_detail/$playlistId")
                     },
@@ -255,6 +258,28 @@ fun MainScreen(
                             popUpTo(NavItem.Home.route)
                         }
                     }
+                )
+            }
+            // Liked Songs. Reached from the Library's pinned row; the row used to just switch the
+            // Library's own section filter, so this is a new destination rather than a rebuilt one.
+            composable("liked_music") {
+                LikedMusicScreen(
+                    onBackClick = { navController.popBackStack() },
+                    // The whole visible list becomes the queue, so Next/Previous walk the liked
+                    // songs from wherever the user tapped.
+                    onPlaySongs = { song, contextList ->
+                        playerViewModel.playSongWithContext(song, contextList)
+                    },
+                    onPlayAll = { contextList ->
+                        contextList.firstOrNull()?.let { first ->
+                            playerViewModel.playSongWithContext(first, contextList)
+                        }
+                    },
+                    onToggleShuffle = { playerViewModel.toggleShuffle() },
+                    onAddToQueue = { playerViewModel.addToQueue(it) },
+                    shuffleEnabled = playerState.shuffleModeEnabled,
+                    currentSongId = playerState.currentSong?.id,
+                    isPlaying = playerState.isPlaying,
                 )
             }
             composable("playlist_detail/{playlistId}") {

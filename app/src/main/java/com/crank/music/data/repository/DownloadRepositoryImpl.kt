@@ -89,8 +89,24 @@ class DownloadRepositoryImpl @Inject constructor(
 
             // Metadata only for now: isLocal flips to true in markComplete(),
             // so the flag means "bytes fully on disk" rather than "requested".
+            //
+            // The existing row's `isLiked` and `dateAdded` are carried forward deliberately.
+            // `SongDao.insertSong` is an `@Insert(onConflict = REPLACE)`, so this write replaces
+            // the whole row — and `Song.toEntity` defaults `isLiked` to false. Enqueueing a
+            // download with a bare `toEntity()` therefore silently un-liked the song: it vanished
+            // from Liked Songs the moment the user downloaded it. `dateAdded` matters for the same
+            // reason, because that is the column the liked query orders by, so resetting it also
+            // silently reordered the user's library.
+            val existing = try {
+                songDao.getSongById(song.id)
+            } catch (e: Exception) {
+                null
+            }
             songDao.insertSong(
-                song.toEntity(isLiked = false, dateAdded = System.currentTimeMillis()).copy(isLocal = false)
+                song.toEntity(
+                    isLiked = existing?.isLiked == true,
+                    dateAdded = existing?.dateAdded ?: System.currentTimeMillis(),
+                ).copy(isLocal = false)
             )
         } catch (e: Exception) {
             Log.e("CRANK_DOWNLOAD", "Download failed for ${song.title}: ${e.message}", e)
