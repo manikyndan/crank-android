@@ -594,11 +594,15 @@ private fun LikedTrackRow(
  * path. Releasing past the halfway point snaps fully open rather than removing immediately, so a
  * stray horizontal scroll cannot delete a song.
  *
- * The panel is composed only while it is being revealed, never at rest. That is not just an
- * optimisation for a long list: an always-present panel puts a live "Remove" click target
- * underneath every row, and any pixel the row's own surface does not cover — the hairline divider
- * between rows, most obviously — would fall through to it and delete a song on an ordinary tap.
- * Not composing it makes the resting state genuinely inert.
+ * The panel is composed only while the row is displaced — including the retract animation — never
+ * at rest. That is not just an optimisation for a long list: an always-present panel puts a live
+ * "Remove" click target underneath every row, and any pixel the row's own surface does not cover
+ * — the hairline divider between rows, most obviously — would fall through to it and delete a song
+ * on an ordinary tap. Not composing it makes the resting state genuinely inert.
+ *
+ * It is keyed on `animated` (the smoothed offset), not on `offset` itself: on release-to-close
+ * `offset` snaps to 0 instantly, but `animated` eases the rest of the way, so gating on `offset`
+ * would drop the panel while the row is still sliding home and the red would pop out a beat early.
  */
 @Composable
 private fun SwipeToRemove(
@@ -613,7 +617,7 @@ private fun SwipeToRemove(
     val animated by animateFloatAsState(targetValue = offset, label = "swipe_offset")
 
     Box(modifier = Modifier.fillMaxWidth()) {
-        if (offset != 0f) {
+        if (animated != 0f) {
             Row(
                 modifier = Modifier
                     .matchParentSize()
