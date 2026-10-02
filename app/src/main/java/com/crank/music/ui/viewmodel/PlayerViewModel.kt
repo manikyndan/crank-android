@@ -260,6 +260,12 @@ class PlayerViewModel @Inject constructor(
                 Player.STATE_BUFFERING -> {
                     _playerState.update { it.copy(isLoading = true) }
                 }
+                Player.STATE_IDLE -> {
+                    // Nothing is loading once the player is stopped or has no media. Without
+                    // this case the spinner could stay up after playback stopped, because no
+                    // other state transition clears it.
+                    _playerState.update { it.copy(isLoading = false) }
+                }
                 Player.STATE_ENDED -> {
                     _playerState.update { it.copy(isLoading = false) }
                     handleSongEnd()
@@ -1603,6 +1609,14 @@ class PlayerViewModel @Inject constructor(
         player.removeListener(playerListener)
         sleepTimerJob?.cancel()
         positionSaveJob?.cancel()
+
+        // Detach from the OS-transport bridge. This ViewModel is activity-scoped, so onCleared
+        // runs as the app's last activity finishes — but the bridge is a process-wide singleton
+        // and the lambdas it holds capture `this`. Left installed, a finished ViewModel stayed
+        // reachable and could still receive notification / lock-screen / Bluetooth skip commands.
+        // Clearing makes those commands no-op until a new instance registers in its init block.
+        RemoteControlBridge.onSkipToNext = null
+        RemoteControlBridge.onSkipToPrevious = null
     }
 
     private fun MediaItem.toSong(): Song {

@@ -3,6 +3,7 @@ package com.crank.music.ui.viewmodel
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.crank.music.core.rethrowIfCancellation
 import com.crank.music.data.local.HistoryEntity
 import com.crank.music.data.local.SongDao
 import com.crank.music.domain.model.Collection
@@ -131,6 +132,7 @@ class HomeViewModel @Inject constructor(
                         }
                     }
                 } catch (e: Exception) {
+                    e.rethrowIfCancellation()
                     Log.e("CRANK_HOME", "Failed to load history: ${e.message}")
                     emptyList()
                 }
@@ -139,6 +141,7 @@ class HomeViewModel @Inject constructor(
                 val trendingSongs = try {
                     musicRepository.search("top hits").take(10)
                 } catch (e: Exception) {
+                    e.rethrowIfCancellation()
                     Log.e("CRANK_HOME", "Failed to load trending: ${e.message}")
                     emptyList()
                 }
@@ -154,6 +157,7 @@ class HomeViewModel @Inject constructor(
                     }
                     allRecs.take(8)
                 } catch (e: Exception) {
+                    e.rethrowIfCancellation()
                     Log.e("CRANK_HOME", "Failed to load recommendations: ${e.message}")
                     emptyList()
                 }
@@ -225,6 +229,7 @@ class HomeViewModel @Inject constructor(
                     isLoading = false
                 )
             } catch (e: Exception) {
+                e.rethrowIfCancellation()
                 Log.e("CRANK_HOME", "Failed to load home data: ${e.message}")
                 _uiState.value = _uiState.value.copy(isLoading = false)
             }
@@ -242,7 +247,7 @@ class HomeViewModel @Inject constructor(
     fun refreshRecommendations() {
         viewModelScope.launch {
             try {
-                val queries = listOf("trending now", "new music", "popular songs", "best of 2024")
+                val queries = listOf("trending now", "new music", "popular songs", "top hits")
                 val newRecs = mutableListOf<Song>()
                 for (query in queries) {
                     val results = musicRepository.search(query).take(2)
@@ -262,6 +267,7 @@ class HomeViewModel @Inject constructor(
                 }
                 _uiState.value = _uiState.value.copy(recommended = current + newItems)
             } catch (e: Exception) {
+                e.rethrowIfCancellation()
                 Log.e("CRANK_HOME", "Failed to refresh: ${e.message}")
             }
         }

@@ -8,6 +8,7 @@ import com.crank.music.data.local.SongDao
 import com.crank.music.data.local.toEntity
 import com.crank.music.domain.model.Playlist
 import com.crank.music.domain.model.Song
+import com.crank.music.domain.repository.DownloadRepository
 import com.crank.music.domain.repository.MusicRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
@@ -238,7 +239,10 @@ data class LibraryUiState(
 @HiltViewModel
 class LibraryViewModel @Inject constructor(
     private val musicRepository: MusicRepository,
-    private val songDao: SongDao
+    private val songDao: SongDao,
+    // Needed by the multi-select Download/Delete actions, which previously only edited an
+    // in-memory list and never reached the database or the transfer engine.
+    private val downloadRepository: DownloadRepository,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(LibraryUiState())
@@ -325,7 +329,12 @@ class LibraryViewModel @Inject constructor(
                 val artists = buildArtists(likedSongs, downloadedSongs, mostPlayed)
                 val albums = buildAlbums(likedSongs, downloadedSongs, mostPlayed)
 
-                _uiState.value = LibraryUiState(
+                // Copy onto the existing state rather than constructing a fresh LibraryUiState.
+                // A whole-object replacement reset every UI-only field — selected tab, sort,
+                // grid/list mode, search text — so `refresh()` (called whenever the user came
+                // back after listening, liking or downloading) silently bounced them to the
+                // "All" tab sorted A–Z. Only the derived data is replaced here.
+                _uiState.value = _uiState.value.copy(
                     playlists = playlists,
                     artists = artists,
                     albums = albums,
@@ -647,23 +656,77 @@ class LibraryViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Removes the selected songs from the library for real.
+     *
+     * Previously this only edited the in-memory `songs` list, so the "deleted" rows reappeared on
+     * the next load — the database was never touched. It now deletes each row (purging any
+     * download first, so no orphaned bytes are left on disk) and reloads the derived sections.
+     */
     fun deleteSelectedSongs() {
         val selected = _uiState.value.selectedItems
+        if (selected.isEmpty()) return
+
         _uiState.value = _uiState.value.copy(
-            songs = _uiState.value.songs.filter { it.id !in selected },
             selectedItems = emptySet(),
             isMultiSelectMode = false
         )
+
+        viewModelScope.launch {
+            try {
+                withContext(Dispatchers.IO) {
+                    for (id in selected) {
+                        // Cancel the transfer and free the bytes before dropping the row, so a
+                        // deleted song cannot leave a file the Offline screen no longer knows how
+                        // to clean up. A failure here must not block the library delete, but a
+                        // cancellation must still propagate.
+                        try {
+                            downloadRepository.removeDownload(id)
+                        } catch (e: Exception) {
+                            e.rethrowIfCancellation()
+                            Log.w("CRANK_LIBRARY", "Could not purge download for $id: ${e.message}")
+                        }
+                        songDao.deleteSongById(id)
+                    }
+                }
+                loadLibraryData()
+            } catch (e: Exception) {
+                e.rethrowIfCancellation()
+                Log.e("CRANK_LIBRARY", "Failed to delete selected songs: ${e.message}")
+            }
+        }
     }
 
+    /**
+     * Starts a real download for each selected song.
+     *
+     * Previously this appended the songs to an in-memory `downloadedSongs` list and never called
+     * the download repository, so the screen looked updated while no transfer had been requested.
+     * Each request now goes through [DownloadRepository.downloadSong]; the per-row indicator and
+     * the Offline screen read their state from the transfer engine, not from this list.
+     */
     fun downloadSelectedSongs() {
         val selected = _uiState.value.selectedItems
+        if (selected.isEmpty()) return
+
         val songsToDownload = _uiState.value.songs.filter { it.id in selected }
+        if (songsToDownload.isEmpty()) return
+
         _uiState.value = _uiState.value.copy(
-            downloadedSongs = _uiState.value.downloadedSongs + songsToDownload,
             selectedItems = emptySet(),
             isMultiSelectMode = false
         )
+
+        viewModelScope.launch {
+            for (song in songsToDownload) {
+                try {
+                    downloadRepository.downloadSong(song)
+                } catch (e: Exception) {
+                    e.rethrowIfCancellation()
+                    Log.e("CRANK_LIBRARY", "Download failed for '${song.title}': ${e.message}")
+                }
+            }
+        }
     }
 
     fun getFilteredSongs(): List<Song> {
@@ -678,17 +741,25 @@ class LibraryViewModel @Inject constructor(
         }
 
         filtered = when (state.filterBy) {
-            "Downloaded" -> filtered.filter { it.isLocal || state.downloadedSongs.any { d -> d.id == it.id } }
-            "Explicit" -> filtered.filter { it.title.contains("feat") || it.title.contains("explicit") }
-            "Released this year" -> filtered
+            // `isLocal` is the durable "bytes are on disk" flag; `downloadedSongs` is already a
+            // subset of it, so the extra `any {}` scan was redundant.
+            "Downloaded" -> filtered.filter { it.isLocal }
+            // The explicit flag now comes from the source (InnerTube's MUSIC_EXPLICIT_BADGE /
+            // iTunes' trackExplicitness). Matching on the title text — "feat"/"explicit" — was a
+            // guess that flagged the wrong songs and missed the real ones, and migration v5→v6
+            // added the column precisely so this filter could be honest.
+            "Explicit" -> filtered.filter { it.isExplicit }
             else -> filtered
         }
 
         filtered = when (state.sortBy) {
             "Name" -> filtered.sortedBy { it.title.lowercase() }
             "Artist" -> filtered.sortedBy { it.artistName.lowercase() }
-            "Album" -> filtered.sortedBy { it.albumId ?: "" }
-            "Date Added" -> filtered.reversed()
+            "Album" -> filtered.sortedBy { it.albumName?.lowercase() ?: it.albumId.orEmpty() }
+            // `songs` arrives from the liked query already ordered newest-first, so "Date Added"
+            // is that order preserved. `reversed()`, which stood here, showed the oldest first —
+            // the opposite of what the "Recently added" label promises.
+            "Date Added" -> filtered
             "Duration" -> filtered.sortedBy { it.durationMs }
             else -> filtered
         }

@@ -342,36 +342,44 @@ private fun startAudioRecording(
             return@launch
         }
 
+        // Held outside the try so the finally block can release it on every exit path. An
+        // AudioRecord that is never released keeps the microphone open for the process's
+        // lifetime, so a mid-read failure (or the early "not initialized" return) must not leak it.
+        var recorder: AudioRecord? = null
         try {
-            val recorder = AudioRecord(
+            val activeRecorder = AudioRecord(
                 MediaRecorder.AudioSource.MIC,
                 sampleRate,
                 channelConfig,
                 audioFormat,
                 bufferSize
             )
+            recorder = activeRecorder
 
-            if (recorder.state != AudioRecord.STATE_INITIALIZED) {
+            if (activeRecorder.state != AudioRecord.STATE_INITIALIZED) {
                 withContext(Dispatchers.Main) { onError("Microphone unavailable") }
                 return@launch
             }
 
             val outputStream = ByteArrayOutputStream()
             val buffer = ByteArray(bufferSize)
-            recorder.startRecording()
+            activeRecorder.startRecording()
 
             val recordTimeMs = 5000L
             val startTime = System.currentTimeMillis()
 
             while (System.currentTimeMillis() - startTime < recordTimeMs) {
-                val read = recorder.read(buffer, 0, buffer.size)
+                val read = activeRecorder.read(buffer, 0, buffer.size)
                 if (read > 0) {
                     outputStream.write(buffer, 0, read)
                 }
             }
 
-            recorder.stop()
-            recorder.release()
+            activeRecorder.stop()
+            activeRecorder.release()
+            // Released on the success path; clear the reference so the finally block does not
+            // release it a second time.
+            recorder = null
 
             val capturedBytes = outputStream.toByteArray()
             withContext(Dispatchers.Main) {
@@ -382,6 +390,8 @@ private fun startAudioRecording(
             withContext(Dispatchers.Main) {
                 onError(e.message ?: "Recording error")
             }
+        } finally {
+            recorder?.release()
         }
     }
 }

@@ -52,6 +52,31 @@ jobs:
       - name: Run unit tests
         run: ./gradlew testDebugUnitTest
 
+      # Android Lint. Run as a REPORT first, not a gate: the step is `continue-on-error` so the
+      # current findings surface without failing an otherwise-good build. Once the report is
+      # clean, delete `continue-on-error` to make new lint errors block the PR.
+      #
+      # Note this is lint for the debug variant; `lintRelease` would also exercise the R8/shrinker
+      # configuration, but `assembleRelease` above already compiles that path.
+      - name: Run Android Lint (report only)
+        continue-on-error: true
+        run: ./gradlew lintDebug
+
+      - name: Upload lint report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lint-report
+          path: |
+            app/build/reports/lint-results-debug.html
+            app/build/reports/lint-results-debug.xml
+          if-no-files-found: ignore
+
+      # connectedCheck (instrumented tests) is intentionally NOT wired here: the emulator action
+      # it needs only supports Linux/macOS runners, and this job is `windows-latest`. Add a
+      # separate ubuntu-latest job with reactivecircus/android-emulator-runner to run
+      # `connectedDebugAndroidTest` (the tests already live in app/src/androidTest).
+
       # Surface the JUnit XML so a failure names the assertion, instead of only
       # reporting an exit code.
       - name: Upload test results

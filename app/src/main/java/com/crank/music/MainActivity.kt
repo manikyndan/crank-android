@@ -1,6 +1,7 @@
 package com.crank.music
 
 import android.Manifest
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
@@ -10,6 +11,8 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.core.content.ContextCompat
 import com.crank.music.ui.screens.MainScreen
 import com.crank.music.ui.theme.CrankTheme
@@ -40,6 +43,13 @@ class MainActivity : ComponentActivity() {
     @Inject
     lateinit var themePreference: ThemePreference
 
+    /**
+     * Route requested by a tapped notification (the update notification sets a `navigate_to`
+     * extra). Held as state so [onNewIntent] can update it while the app is already open, and
+     * cleared once `MainScreen` has navigated so a recomposition cannot navigate again.
+     */
+    private var pendingRoute by mutableStateOf<String?>(null)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
@@ -49,6 +59,9 @@ class MainActivity : ComponentActivity() {
         ) {
             notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
+
+        // A cold start from a tapped notification carries the requested route here.
+        pendingRoute = intent?.getStringExtra(EXTRA_NAVIGATE_TO)
 
         val initialMode = themePreference.initialMode()
 
@@ -62,8 +75,28 @@ class MainActivity : ComponentActivity() {
             val effectiveMode = mode ?: initialMode
 
             CrankTheme(darkTheme = !effectiveMode.isLight(systemInDarkTheme)) {
-                MainScreen()
+                MainScreen(
+                    startRoute = pendingRoute,
+                    onRouteConsumed = { pendingRoute = null },
+                )
             }
         }
+    }
+
+    /**
+     * Handles an intent delivered while the activity is already running.
+     *
+     * The update notification's PendingIntent uses SINGLE_TOP | CLEAR_TOP, so tapping it while
+     * Crank is open arrives here rather than recreating the activity.
+     */
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        pendingRoute = intent.getStringExtra(EXTRA_NAVIGATE_TO)
+    }
+
+    companion object {
+        /** Extra the update notification sets to open a specific screen. */
+        const val EXTRA_NAVIGATE_TO = "navigate_to"
     }
 }

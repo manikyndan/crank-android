@@ -1,5 +1,9 @@
 package com.crank.music.ui.screens
 
+import java.util.Locale
+
+import com.crank.music.util.confirmHaptic
+
 import android.view.HapticFeedbackConstants
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
@@ -178,7 +182,7 @@ fun OfflineMusicScreen(
                     },
                     onRemoveItem = {
                         viewModel.removeItem(it)
-                        view.performHapticFeedback(HapticFeedbackConstants.CONFIRM)
+                        confirmHaptic(view)
                     },
                     onCancelSwipe = { viewModel.setSwipedItemId(null) }
                 )
@@ -1282,9 +1286,9 @@ private fun SectionHeader(
 
 private fun formatBytes(bytes: Long): String {
     return when {
-        bytes >= 1_073_741_824 -> String.format("%.1f GB", bytes / 1_073_741_824.0)
-        bytes >= 1_048_576 -> String.format("%.0f MB", bytes / 1_048_576.0)
-        bytes >= 1024 -> String.format("%.0f KB", bytes / 1024.0)
+        bytes >= 1_073_741_824 -> String.format(Locale.US, "%.1f GB", bytes / 1_073_741_824.0)
+        bytes >= 1_048_576 -> String.format(Locale.US, "%.0f MB", bytes / 1_048_576.0)
+        bytes >= 1024 -> String.format(Locale.US, "%.0f KB", bytes / 1024.0)
         else -> "$bytes B"
     }
 }

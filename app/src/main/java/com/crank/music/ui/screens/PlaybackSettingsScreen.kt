@@ -1,5 +1,7 @@
 package com.crank.music.ui.screens
 
+import java.util.Locale
+
 import android.view.HapticFeedbackConstants
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
@@ -679,7 +681,7 @@ private fun PlaybackSpeedSection(
                         color = TextSecondary
                     )
                     Text(
-                        text = String.format("%.2fx", speed),
+                        text = String.format(Locale.US, "%.2fx", speed),
                         style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                         color = ChampagneGold
                     )

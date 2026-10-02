@@ -29,7 +29,15 @@ class UpdateNotificationHelper @Inject constructor(
         const val NOTIFICATION_ID_INSTALL_SUCCESS = 1003
     }
 
+    /**
+     * Creates the update notification channel.
+     *
+     * Guarded on API 26: `NotificationChannel` and `createNotificationChannel` do not exist
+     * below Oreo while `minSdk` is 24, so an unguarded call crashed the process on Android 7.x.
+     */
     fun createNotificationChannel() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+
         val channel = NotificationChannel(
             CHANNEL_ID,
             CHANNEL_NAME,
@@ -45,7 +53,7 @@ class UpdateNotificationHelper @Inject constructor(
     fun showUpdateAvailable(versionName: String) {
         val intent = Intent(context, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
-            putExtra("navigate_to", "update_checker")
+            putExtra(MainActivity.EXTRA_NAVIGATE_TO, "update_checker")
         }
         val pendingIntent = PendingIntent.getActivity(
             context, 0, intent,
@@ -70,7 +78,7 @@ class UpdateNotificationHelper @Inject constructor(
     fun showDownloadComplete() {
         val intent = Intent(context, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
-            putExtra("navigate_to", "update_checker")
+            putExtra(MainActivity.EXTRA_NAVIGATE_TO, "update_checker")
         }
         val pendingIntent = PendingIntent.getActivity(
             context, 0, intent,

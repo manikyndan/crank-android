@@ -9,6 +9,7 @@ import com.crank.music.domain.model.Album
 import com.crank.music.domain.model.Song
 import com.crank.music.domain.repository.MusicRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
@@ -163,6 +164,11 @@ class SearchViewModel @Inject constructor(
                     filteredAlbums = albumsDeferred.await(),
                     isLoading = false
                 )
+            } catch (e: CancellationException) {
+                // A newer keystroke replaced this job (`searchJob?.cancel()` above). Rethrow so
+                // the coroutine ends at its cancellation point instead of writing `isLoading =
+                // false` over the job that is now running — see CoroutineDiscipline.
+                throw e
             } catch (e: Exception) {
                 Log.e("CRANK_SEARCH", "Search failed: ${e.message}")
                 _uiState.value = _uiState.value.copy(isLoading = false)

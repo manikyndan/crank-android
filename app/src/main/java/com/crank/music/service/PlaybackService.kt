@@ -1,7 +1,9 @@
 package com.crank.music.service
 
 import android.content.Intent
+import androidx.annotation.OptIn
 import androidx.media3.common.Player
+import androidx.media3.common.util.UnstableApi
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
 import dagger.hilt.android.AndroidEntryPoint
@@ -63,6 +65,7 @@ object RemoteControlBridge {
  * own queue is empty. Play, pause and seek fall through to the single media
  * item, which honours them natively.
  */
+@OptIn(UnstableApi::class)
 internal object CrankSessionCallback : MediaSession.Callback {
     override fun onConnect(
         session: MediaSession,
@@ -80,6 +83,11 @@ internal object CrankSessionCallback : MediaSession.Callback {
         )
     }
 
+    // Still the only place a client's skip request can be routed to this app's queue: ExoPlayer
+    // holds one media item, so its own seekToNext is a no-op. Suppressed because Media3 marks the
+    // callback deprecated (it prefers controller-side command handling) but has not replaced it for
+    // this single-item case — the callback is still invoked.
+    @Suppress("OVERRIDE_DEPRECATION")
     override fun onPlayerCommandRequest(
         session: MediaSession,
         controller: MediaSession.ControllerInfo,

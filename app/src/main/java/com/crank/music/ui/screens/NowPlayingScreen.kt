@@ -1,5 +1,7 @@
 package com.crank.music.ui.screens
 
+import java.util.Locale
+
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -93,6 +95,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
 import androidx.core.graphics.ColorUtils
 import androidx.media3.common.Player
 import androidx.palette.graphics.Palette
@@ -228,10 +231,17 @@ fun NowPlayingScreen(
                 deviceVolume = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC)
             }
         }
-        context.registerReceiver(
+        // ContextCompat rather than the 3-arg `Context.registerReceiver(receiver, filter, flags)`
+        // overload: that overload is API 26 while minSdk is 24, so the previous form crashed with
+        // a `NoSuchMethodError` on Android 7.x the moment the player screen opened. The compat
+        // helper calls the flagged overload where it exists and falls back to the 2-arg form below
+        // Oreo. RECEIVER_NOT_EXPORTED only governs broadcasts from *other apps* — system
+        // broadcasts such as VOLUME_CHANGED_ACTION are still delivered to a non-exported receiver.
+        ContextCompat.registerReceiver(
+            context,
             receiver,
             IntentFilter("android.media.VOLUME_CHANGED_ACTION"),
-            Context.RECEIVER_NOT_EXPORTED
+            ContextCompat.RECEIVER_NOT_EXPORTED
         )
         onDispose { context.unregisterReceiver(receiver) }
     }
@@ -1151,12 +1161,12 @@ private fun formatMs(ms: Long): String {
     val totalSeconds = (ms / 1000).coerceAtLeast(0)
     val minutes = totalSeconds / 60
     val seconds = totalSeconds % 60
-    return String.format("%02d:%02d", minutes, seconds)
+    return String.format(Locale.US, "%02d:%02d", minutes, seconds)
 }
 
 private fun formatRemaining(ms: Long): String {
     val totalSeconds = (ms / 1000).coerceAtLeast(0)
     val minutes = totalSeconds / 60
     val seconds = totalSeconds % 60
-    return String.format("-%d:%02d", minutes, seconds)
+    return String.format(Locale.US, "-%d:%02d", minutes, seconds)
 }

@@ -1,5 +1,7 @@
 package com.crank.music.ui.components
 
+import com.crank.music.util.confirmHaptic
+
 import android.view.HapticFeedbackConstants
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
@@ -135,7 +137,7 @@ fun NotificationPanel(
                         showSettings = uiState.showSettings,
                         onMarkAllRead = {
                             viewModel.markAllRead()
-                            view.performHapticFeedback(HapticFeedbackConstants.CONFIRM)
+                            confirmHaptic(view)
                         },
                         onToggleSettings = {
                             viewModel.toggleSettings()
@@ -233,7 +235,7 @@ fun NotificationPanel(
                                     },
                                     onDismiss = {
                                         viewModel.dismissNotification(notification.id)
-                                        view.performHapticFeedback(HapticFeedbackConstants.CONFIRM)
+                                        confirmHaptic(view)
                                     },
                                     onCancelSwipe = {
                                         viewModel.setSwipedId(null)

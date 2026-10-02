@@ -1,5 +1,7 @@
 package com.crank.music.ui.screens
 
+import java.util.Locale
+
 import android.view.HapticFeedbackConstants
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
@@ -734,7 +736,7 @@ private fun DataSaverSection(
                                 )
                                 Spacer(modifier = Modifier.width(8.dp))
                                 Text(
-                                    text = "You've saved ${String.format("%.1f", dataSavedMB)} MB this month",
+                                    text = "You've saved ${String.format(Locale.US, "%.1f", dataSavedMB)} MB this month",
                                     style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
                                     color = ChampagneGold
                                 )

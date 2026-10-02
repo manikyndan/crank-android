@@ -3,6 +3,7 @@ package com.crank.music.ui.viewmodel
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.crank.music.core.rethrowIfCancellation
 import com.crank.music.data.local.SongDao
 import com.crank.music.domain.repository.MusicRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -61,6 +62,7 @@ class ProfileViewModel @Inject constructor(
                     avatarUrl = ""
                 )
             } catch (e: Exception) {
+                e.rethrowIfCancellation()
                 Log.e("CRANK_PROFILE", "Failed to load profile: ${e.message}")
             }
         }

@@ -8,8 +8,6 @@ import android.webkit.WebView
 import androidx.annotation.MainThread
 import androidx.collection.ArrayMap
 import com.crank.music.data.remote.innertube.YouTubeClient
-import java.time.Instant
-import java.time.temporal.ChronoUnit
 import java.util.Collections
 import kotlin.coroutines.Continuation
 import kotlin.coroutines.resume
@@ -81,7 +79,20 @@ private constructor(
         onInitializationErrorCloseAndCancel(t)
     }
 
-    private lateinit var expirationInstant: Instant
+    /**
+     * When the current integrity token stops being usable, in epoch milliseconds.
+     *
+     * `0L` (the default, i.e. before any token has been minted) reads as "already expired", which
+     * is the honest answer: there is no usable token yet, so [PoTokenGenerator] rebuilds the
+     * minter instead of using a token it does not have.
+     *
+     * An epoch-millis `Long` rather than a `lateinit Instant`: `java.time.Instant` is API 26 while
+     * `minSdk` is 24 and core library desugaring is not enabled, so the previous form was a
+     * guaranteed `NoClassDefFoundError` on Android 7.x. It was also `lateinit`, so a minter that
+     * had not yet received its integrity token would throw `UninitializedPropertyAccessException`
+     * from inside [PoTokenGenerator]'s lock rather than reporting "expired".
+     */
+    private var expirationAtMs: Long = 0L
 
     init {
         val webViewSettings = webView.settings
@@ -196,8 +207,8 @@ private constructor(
 
                 // Leave 10 minutes of margin: the reported lifetime is optimistic, and a token
                 // that expires mid-request produces a 403 that looks like an anti-bot refusal.
-                expirationInstant =
-                    Instant.now().plusSeconds(expirationTimeInSeconds).minus(10, ChronoUnit.MINUTES)
+                expirationAtMs =
+                    System.currentTimeMillis() + expirationTimeInSeconds * 1000L - 10 * 60 * 1000L
 
                 webView.evaluateJavascript(
                     """try {
@@ -282,7 +293,7 @@ private constructor(
 
     /** True once the integrity token's usable lifetime has elapsed. */
     val isExpired: Boolean
-        get() = Instant.now().isAfter(expirationInstant)
+        get() = System.currentTimeMillis() >= expirationAtMs
 
     // endregion
 

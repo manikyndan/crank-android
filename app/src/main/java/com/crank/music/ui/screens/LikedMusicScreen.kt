@@ -1,5 +1,7 @@
 package com.crank.music.ui.screens
 
+import java.util.Locale
+
 import android.content.Intent
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
@@ -859,5 +861,5 @@ private fun LikedMessage(text: String) {
 private fun formatLikedDuration(durationMs: Long): String {
     if (durationMs <= 0L) return "—"
     val totalSeconds = durationMs / 1000
-    return String.format("%d:%02d", totalSeconds / 60, totalSeconds % 60)
+    return String.format(Locale.US, "%d:%02d", totalSeconds / 60, totalSeconds % 60)
 }

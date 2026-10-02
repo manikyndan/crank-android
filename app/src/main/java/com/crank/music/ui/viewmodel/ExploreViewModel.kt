@@ -1,5 +1,7 @@
 package com.crank.music.ui.viewmodel
 
+import java.util.Locale
+
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -443,6 +445,6 @@ class ExploreViewModel @Inject constructor(
         val totalSeconds = durationMs / 1000
         val minutes = totalSeconds / 60
         val seconds = totalSeconds % 60
-        return String.format("%d:%02d", minutes, seconds)
+        return String.format(Locale.US, "%d:%02d", minutes, seconds)
     }
 }

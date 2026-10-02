@@ -1,5 +1,6 @@
 package com.crank.music.ui.viewmodel
 
+import android.util.Log
 import android.media.audiofx.BassBoost
 import android.media.audiofx.Equalizer
 import android.media.audiofx.LoudnessEnhancer
@@ -94,7 +95,7 @@ class EqualizerViewModel @Inject constructor() : ViewModel() {
             applyBandLevelsToNative(_uiState.value.bandLevels)
             applyPreampToNative(_uiState.value.preampDb)
         } catch (e: Exception) {
-            e.printStackTrace()
+            Log.w("CRANK_EQ", "Failed to attach audio session $sessionId", e)
             _uiState.value = _uiState.value.copy(
                 audioSessionId = sessionId,
                 statusMessage = "Native Equalizer Active"
@@ -107,7 +108,7 @@ class EqualizerViewModel @Inject constructor() : ViewModel() {
         try {
             nativeEqualizer?.enabled = enabled
         } catch (e: Exception) {
-            e.printStackTrace()
+            Log.w("CRANK_EQ", "Failed to toggle equalizer", e)
         }
     }
 
@@ -150,7 +151,7 @@ class EqualizerViewModel @Inject constructor() : ViewModel() {
                 nativeBassBoost?.setStrength(800.toShort())
             }
         } catch (e: Exception) {
-            e.printStackTrace()
+            Log.w("CRANK_EQ", "Failed to toggle bass boost", e)
         }
     }
 
@@ -162,7 +163,7 @@ class EqualizerViewModel @Inject constructor() : ViewModel() {
                 nativeLoudnessEnhancer?.setTargetGain(300)
             }
         } catch (e: Exception) {
-            e.printStackTrace()
+            Log.w("CRANK_EQ", "Failed to toggle normalization", e)
         }
     }
 
@@ -206,7 +207,7 @@ class EqualizerViewModel @Inject constructor() : ViewModel() {
             val millibels = (dbLevel * 100).coerceIn(-1200, 1200).toShort()
             nativeEqualizer?.setBandLevel(bandIndex.toShort(), millibels)
         } catch (e: Exception) {
-            e.printStackTrace()
+            Log.w("CRANK_EQ", "Failed to set band $bandIndex to $dbLevel dB", e)
         }
     }
 
@@ -221,7 +222,7 @@ class EqualizerViewModel @Inject constructor() : ViewModel() {
             val gainMillibels = db * 100
             nativeLoudnessEnhancer?.setTargetGain(gainMillibels)
         } catch (e: Exception) {
-            e.printStackTrace()
+            Log.w("CRANK_EQ", "Failed to set preamp to $db dB", e)
         }
     }
 
@@ -232,7 +233,7 @@ class EqualizerViewModel @Inject constructor() : ViewModel() {
             nativeBassBoost?.release()
             nativeLoudnessEnhancer?.release()
         } catch (e: Exception) {
-            e.printStackTrace()
+            Log.w("CRANK_EQ", "Failed to release audio effects", e)
         }
     }
 }

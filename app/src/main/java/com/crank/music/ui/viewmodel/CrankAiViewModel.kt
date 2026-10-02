@@ -2,6 +2,7 @@ package com.crank.music.ui.viewmodel
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.crank.music.core.rethrowIfCancellation
 import com.crank.music.domain.model.Song
 import com.crank.music.domain.repository.MusicRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -146,6 +147,7 @@ class CrankAiViewModel @Inject constructor(
                 try {
                     musicRepository.search("top hits trending")
                 } catch (e: Exception) {
+                    e.rethrowIfCancellation()
                     emptyList()
                 }
             } else songs

@@ -1,5 +1,9 @@
 package com.crank.music.ui.screens
 
+import java.util.Locale
+
+import com.crank.music.util.confirmHaptic
+
 import android.view.HapticFeedbackConstants
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
@@ -235,7 +239,7 @@ fun PrivacySecurityScreen(
             onDismiss = { viewModel.showClearHistoryDialog(false) },
             onConfirm = {
                 viewModel.clearListeningHistory()
-                view.performHapticFeedback(HapticFeedbackConstants.CONFIRM)
+                confirmHaptic(view)
             }
         )
     }
@@ -786,7 +790,7 @@ private fun ListeningActivitySection(
                             val minutes = (remainingMs / 60_000).toInt()
                             val seconds = ((remainingMs % 60_000) / 1000).toInt()
                             Text(
-                                text = "Active — ${minutes}:${String.format("%02d", seconds)} remaining",
+                                text = "Active — ${minutes}:${String.format(Locale.US, "%02d", seconds)} remaining",
                                 style = MaterialTheme.typography.labelMedium,
                                 color = ChampagneGold
                             )

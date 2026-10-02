@@ -3,6 +3,7 @@ package com.crank.music.feature.ytmusic
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.crank.music.core.rethrowIfCancellation
 import com.crank.music.data.local.SongDao
 import com.crank.music.domain.model.Album
 import com.crank.music.domain.model.Collection
@@ -289,6 +290,7 @@ class YtMusicHomeViewModel @Inject constructor(
                     errorMessage = null,
                 )
             } catch (e: Exception) {
+                e.rethrowIfCancellation()
                 Log.e("CRANK_YT_HOME", "Failed to load YT home: ${e.message}")
                 _uiState.value = _uiState.value.copy(
                     isLoading = false,

@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -36,10 +37,24 @@ import com.crank.music.ui.viewmodel.PlayerViewModel
 fun MainScreen(
     navController: NavHostController = rememberNavController(),
     playerViewModel: PlayerViewModel = hiltViewModel(),
-    libraryViewModel: com.crank.music.ui.viewmodel.LibraryViewModel = hiltViewModel()
+    libraryViewModel: com.crank.music.ui.viewmodel.LibraryViewModel = hiltViewModel(),
+    /** Route to open immediately, e.g. from a tapped notification. Null means a normal start. */
+    startRoute: String? = null,
+    /** Called once [startRoute] has been navigated, so the caller can clear it. */
+    onRouteConsumed: () -> Unit = {},
 ) {
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route ?: NavItem.Home.route
+
+    // Deep link from a tapped notification. Runs once per distinct non-null route; the caller
+    // clears it through onRouteConsumed so a recomposition cannot navigate a second time.
+    LaunchedEffect(startRoute) {
+        if (startRoute != null) {
+            navController.navigate(startRoute) { launchSingleTop = true }
+            onRouteConsumed()
+        }
+    }
+
     val playerState by playerViewModel.playerState.collectAsState()
     val song = playerState.currentSong
     val isCurrentLiked by playerViewModel.isCurrentLiked.collectAsState()
@@ -48,7 +63,10 @@ fun MainScreen(
     // tab switches instead of being torn down with whichever screen is on top.
     var showAddToPlaylist by remember { mutableStateOf(false) }
 
-    val isFullscreenRoute = currentRoute == "now_playing" || currentRoute == "settings" || currentRoute == "appearance" || currentRoute == "privacy_security" || currentRoute == "offline_music" || currentRoute == "update_checker" || currentRoute == "playback_settings" || currentRoute == "audio_quality" || currentRoute == "crank_ai" || currentRoute == "equalizer" || currentRoute == "music_dna" || currentRoute == "downloads" || currentRoute == "queue" || currentRoute == "lyrics" || currentRoute == "recognition" || currentRoute == "liked_music" || currentRoute.startsWith("playlist_detail") || currentRoute.startsWith("album_detail") || currentRoute.startsWith("artist_detail")
+    // Detail and settings routes render edge-to-edge; the bottom navigation bar belongs to the
+    // four tabs only. Expressed as data (see [routeIsFullscreen]) so adding a screen cannot
+    // silently miss the rule the way the previous 600-character `||` chain could.
+    val isFullscreenRoute = routeIsFullscreen(currentRoute)
 
     Scaffold(
         modifier = Modifier.fillMaxSize(),
@@ -527,3 +545,40 @@ private fun albumRoute(album: Album): String {
     val artwork = android.net.Uri.encode(album.artworkUrl)
     return "album_detail/$title?albumArtist=$artist&browseId=$browseId&releaseYear=$year&artworkUrl=$artwork"
 }
+
+/**
+ * Routes that hide the bottom navigation bar because they render edge-to-edge.
+ *
+ * A named set rather than an inline `||` chain: the previous form was a single 600-character
+ * expression, so a new fullscreen screen had to be remembered in exactly the right place, and a
+ * typo'd route string failed silently (the bar would simply appear). Keeping the routes here
+ * makes the list reviewable and testable.
+ */
+private val FULLSCREEN_ROUTES = setOf(
+    "now_playing",
+    "settings",
+    "appearance",
+    "privacy_security",
+    "offline_music",
+    "update_checker",
+    "playback_settings",
+    "audio_quality",
+    "crank_ai",
+    "equalizer",
+    "music_dna",
+    "downloads",
+    "queue",
+    "lyrics",
+    "recognition",
+    "liked_music",
+)
+
+/**
+ * Detail routes, matched by prefix because their route string carries arguments
+ * (e.g. `album_detail/{title}?albumArtist=…`), so an equality check would never match.
+ */
+private val FULLSCREEN_PREFIXES = listOf("playlist_detail", "album_detail", "artist_detail")
+
+/** True when [route] should hide the bottom navigation bar. */
+private fun routeIsFullscreen(route: String): Boolean =
+    route in FULLSCREEN_ROUTES || FULLSCREEN_PREFIXES.any { route.startsWith(it) }

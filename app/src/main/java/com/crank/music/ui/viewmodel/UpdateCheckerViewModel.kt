@@ -1,6 +1,7 @@
 package com.crank.music.ui.viewmodel
 
 import androidx.lifecycle.ViewModel
+import com.crank.music.BuildConfig
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -28,8 +29,10 @@ data class UpdateInfo(
 
 data class UpdateUiState(
     val phase: UpdatePhase = UpdatePhase.CHECKING,
-    val currentVersion: String = "1.0.0",
-    val currentBuild: String = "Build 1",
+    // Read from the build rather than hardcoded: this used to claim the installed version was
+    // "1.0.0" while the app was actually on 1.0.3, so the screen was wrong about its own premise.
+    val currentVersion: String = BuildConfig.VERSION_NAME,
+    val currentBuild: String = "Build ${BuildConfig.VERSION_CODE}",
     val lastUpdateDate: String = "Jan 15, 2025",
     val appSize: String = "38.2 MB",
     val updateInfo: UpdateInfo? = null,

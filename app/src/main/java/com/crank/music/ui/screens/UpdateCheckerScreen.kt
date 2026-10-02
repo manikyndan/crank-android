@@ -1,5 +1,6 @@
 package com.crank.music.ui.screens
 
+import com.crank.music.util.confirmHaptic
 import android.view.HapticFeedbackConstants
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
@@ -165,7 +166,7 @@ fun UpdateCheckerScreen(
                             updateInfo = uiState.updateInfo,
                             onDownload = {
                                 viewModel.startDownload()
-                                view.performHapticFeedback(HapticFeedbackConstants.CONFIRM)
+                                confirmHaptic(view)
                             },
                             onRemindLater = {
                                 viewModel.remindLater()
@@ -189,7 +190,7 @@ fun UpdateCheckerScreen(
                         UpdatePhase.DOWNLOAD_COMPLETE -> DownloadCompleteView(
                             onInstall = {
                                 viewModel.installUpdate()
-                                view.performHapticFeedback(HapticFeedbackConstants.CONFIRM)
+                                confirmHaptic(view)
                             },
                             onInstallLater = {
                                 viewModel.remindLater()
@@ -199,7 +200,7 @@ fun UpdateCheckerScreen(
                         UpdatePhase.INSTALLING -> InstallingView()
                         UpdatePhase.INSTALLED -> InstalledView(
                             onRelaunch = {
-                                view.performHapticFeedback(HapticFeedbackConstants.CONFIRM)
+                                confirmHaptic(view)
                             }
                         )
                         UpdatePhase.NO_UPDATE -> NoUpdateView()

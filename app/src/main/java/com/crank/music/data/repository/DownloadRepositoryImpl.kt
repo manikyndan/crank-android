@@ -113,9 +113,38 @@ class DownloadRepositoryImpl @Inject constructor(
         }
     }
 
+    /**
+     * Removes a download: the transfer, its bytes, and the library's "downloaded" flag.
+     *
+     * ## Why the library row is not simply deleted any more
+     *
+     * The `songs` row is the single record that also carries `isLiked` and `dateAdded` — see the
+     * note in [downloadSong], which deliberately preserves both when a download is enqueued.
+     * Deleting the row here therefore deleted the user's *like* along with the download: removing
+     * a download silently un-liked the track, with nothing to explain why it left Liked Songs.
+     *
+     * So a row that exists for a liked song is kept and only has its downloaded flag cleared — it
+     * disappears from Offline/Downloads (both filter on `isLocal`) while staying in the library.
+     * A row that exists purely because of the download (not liked) is deleted outright, so no
+     * orphan metadata is left behind.
+     */
     override suspend fun removeDownload(songId: String) {
+        // Purge the transfer first: this is what actually frees the bytes on disk and evicts the
+        // entry from Media3's download index.
         downloadManager.removeDownload(songId)
-        songDao.deleteSongById(songId)
+
+        val existing = try {
+            songDao.getSongById(songId)
+        } catch (e: Exception) {
+            Log.e("CRANK_DOWNLOAD", "Could not read row for $songId: ${e.message}")
+            null
+        } ?: return
+
+        if (existing.isLiked) {
+            songDao.updateSong(existing.copy(isLocal = false))
+        } else {
+            songDao.deleteSongById(songId)
+        }
     }
 
     override fun getDownloadedSongs(): Flow<List<Song>> {

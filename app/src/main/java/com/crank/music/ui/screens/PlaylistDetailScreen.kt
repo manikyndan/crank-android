@@ -1,5 +1,7 @@
 package com.crank.music.ui.screens
 
+import java.util.Locale
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -231,7 +233,7 @@ private fun SongRow(
         }
 
         Text(
-            text = String.format("%d:%02d", (song.durationMs / 1000) / 60, (song.durationMs / 1000) % 60),
+            text = String.format(Locale.US, "%d:%02d", (song.durationMs / 1000) / 60, (song.durationMs / 1000) % 60),
             style = MaterialTheme.typography.labelSmall,
             color = TextTertiary
         )
