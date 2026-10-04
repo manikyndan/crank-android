@@ -1,0 +1,98 @@
+name: Release APK
+
+# Builds the release APK and publishes it to GitHub Releases with a stable
+# filename, so README and in-app update links never break between versions.
+#
+# Trigger:
+#   - Push a version tag:  git tag v1.0.3 && git push origin v1.0.3
+#   - Or run manually from Actions > Release APK > Run workflow.
+#
+# The published asset is always named `Crank-Music.apk` (no version in the
+# filename). That keeps this direct download link stable forever:
+#   https://github.com/manikyndan/crank-android/releases/latest/download/Crank-Music.apk
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Tag name for the release (e.g. v1.0.3). Only used for manual runs."
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x ./gradlew
+
+      - name: Resolve release tag
+        id: tag
+        shell: bash
+        run: |
+          if [[ "${{ github.ref_type }}" == "tag" ]]; then
+            echo "tag=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
+          elif [[ -n "${{ inputs.release_tag }}" ]]; then
+            echo "tag=${{ inputs.release_tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=v1.0.3" >> "$GITHUB_OUTPUT"
+          fi
+          cat "$GITHUB_OUTPUT"
+
+      # Release signing is driven by keystore.properties, which is git-ignored
+      # and therefore absent here. The build still succeeds and emits an
+      # unsigned APK; wire up signing via repository secrets when a real
+      # keystore exists. The release notes say so explicitly.
+      - name: Build release APK
+        run: ./gradlew assembleRelease --stacktrace
+
+      - name: Stage stable asset name
+        shell: bash
+        run: |
+          ls -la app/build/outputs/apk/release/
+          cp "app/build/outputs/apk/release/Crank Music.apk" Crank-Music.apk
+          ls -la Crank-Music.apk
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.tag }}
+          name: Crank Music ${{ steps.tag.outputs.tag }}
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+          files: Crank-Music.apk
+          body: |
+            ## Download
+
+            **Direct download (Android 7.0+, API 24+):**
+            https://github.com/manikyndan/crank-android/releases/latest/download/Crank-Music.apk
+
+            1. Download `Crank-Music.apk` on your Android device.
+            2. Open it and tap **Install** (allow "Install unknown apps" for your browser if asked).
+            3. Open **Crank Music** and enjoy.
+
+            > This build is unsigned (CI has no release keystore yet). It installs and runs normally;
+            > a future release will be signed with the production key for seamless updates.
