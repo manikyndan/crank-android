@@ -3,6 +3,7 @@ package com.crank.music.ui.viewmodel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.crank.music.data.local.SettingsStore
+import com.crank.music.domain.model.StreamQuality
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -10,26 +11,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
-enum class StreamQuality(val label: String, val kbps: String, val dataPerHour: String, val isHighUsage: Boolean) {
-    LOW("Low", "96 kbps", "~43 MB/hr", false),
-    MEDIUM("Medium", "160 kbps", "~72 MB/hr", false),
-    HIGH("High", "320 kbps", "~144 MB/hr", true),
-    LOSSLESS("Lossless", "FLAC", "~430 MB/hr", true)
-}
-
-enum class SampleRate(val label: String) {
-    K44("44.1 kHz"),
-    K48("48 kHz"),
-    K96("96 kHz"),
-    K192("192 kHz")
-}
-
-enum class BitDepth(val label: String) {
-    B16("16-bit"),
-    B24("24-bit"),
-    B32("32-bit float")
-}
-
+/** How the codec of the currently playing stream is described under the quality picker. */
 enum class BadgeStyle(val label: String) {
     MINIMAL("Minimal"),
     DETAILED("Detailed"),
@@ -38,21 +20,26 @@ enum class BadgeStyle(val label: String) {
 
 data class AudioQualityState(
     val mobileQuality: StreamQuality = StreamQuality.HIGH,
-    val wifiQuality: StreamQuality = StreamQuality.LOSSLESS,
+    val wifiQuality: StreamQuality = StreamQuality.HIGH,
     val downloadQuality: StreamQuality = StreamQuality.HIGH,
-    val showQualityBadge: Boolean = true,
-    val badgeStyle: BadgeStyle = BadgeStyle.MINIMAL,
-    val preferHiRes: Boolean = true,
-    val dolbyAtmos: Boolean = false,
-    val sampleRate: SampleRate = SampleRate.K48,
-    val bitDepth: BitDepth = BitDepth.B24,
     val dataSaverEnabled: Boolean = false,
-    val dataSavedMB: Float = 247.5f,
-    val formatsExpanded: Boolean = false,
-    val currentFormat: String = "FLAC",
-    val codecInfo: String = "FLAC 1.4.3 • 48kHz / 24-bit • Stereo"
+    /** Bytes saved by the metered-network cap, measured from this install. */
+    val dataSavedMB: Float = 0f
 )
 
+/**
+ * Audio quality preferences.
+ *
+ * The choices persisted before this too, but nothing read them: `StreamCascadeResolver` always
+ * selected the highest-bitrate format, so picking "Low" changed nothing and Data Saver saved
+ * nothing. The values are now read by
+ * [com.crank.music.data.repository.MusicRepositoryImpl.getSongStreamUrl], which resolves the
+ * effective ceiling from the active network and passes it into the resolver.
+ *
+ * Everything this screen cannot actually honour — Lossless/FLAC, Dolby Atmos, sample rate, bit
+ * depth, hi-res preference, the quality badge, and the hardcoded `"FLAC 1.4.3 • 48kHz / 24-bit"`
+ * codec readout — has been removed along with its state, so nothing here is decorative.
+ */
 @HiltViewModel
 class AudioQualityViewModel @Inject constructor(
     private val settingsStore: SettingsStore,
@@ -62,35 +49,21 @@ class AudioQualityViewModel @Inject constructor(
     val uiState: StateFlow<AudioQualityState> = _uiState.asStateFlow()
 
     init {
-        // Restore the persisted choices. These used to reset on every screen visit, which made the
-        // whole screen feel broken — you pick Lossless, come back, and it says High again.
         viewModelScope.launch {
-            val mobile = settingsStore.getString(
-                SettingsStore.MOBILE_QUALITY,
-                AudioQualityState().mobileQuality.name,
-            )
-            val wifi = settingsStore.getString(
-                SettingsStore.WIFI_QUALITY,
-                AudioQualityState().wifiQuality.name,
-            )
-            val download = settingsStore.getString(
-                SettingsStore.DOWNLOAD_QUALITY,
-                AudioQualityState().downloadQuality.name,
-            )
+            val defaults = AudioQualityState()
+            val mobile = settingsStore.getString(SettingsStore.MOBILE_QUALITY, defaults.mobileQuality.name)
+            val wifi = settingsStore.getString(SettingsStore.WIFI_QUALITY, defaults.wifiQuality.name)
+            val download = settingsStore.getString(SettingsStore.DOWNLOAD_QUALITY, defaults.downloadQuality.name)
             val dataSaver = settingsStore.getBoolean(SettingsStore.DATA_SAVER, false)
 
             _uiState.value = _uiState.value.copy(
-                mobileQuality = mobile.toQualityOrNull() ?: _uiState.value.mobileQuality,
-                wifiQuality = wifi.toQualityOrNull() ?: _uiState.value.wifiQuality,
-                downloadQuality = download.toQualityOrNull() ?: _uiState.value.downloadQuality,
+                mobileQuality = StreamQuality.fromNameOrNull(mobile) ?: defaults.mobileQuality,
+                wifiQuality = StreamQuality.fromNameOrNull(wifi) ?: defaults.wifiQuality,
+                downloadQuality = StreamQuality.fromNameOrNull(download) ?: defaults.downloadQuality,
                 dataSaverEnabled = dataSaver,
             )
         }
     }
-
-    /** Enum names are the stored form; an unknown value falls back to the caller's default. */
-    private fun String.toQualityOrNull(): StreamQuality? =
-        StreamQuality.entries.firstOrNull { it.name == this }
 
     fun setMobileQuality(quality: StreamQuality) {
         _uiState.value = _uiState.value.copy(mobileQuality = quality)
@@ -112,45 +85,16 @@ class AudioQualityViewModel @Inject constructor(
         viewModelScope.launch { runCatching { block() } }
     }
 
-    fun toggleQualityBadge() {
-        _uiState.value = _uiState.value.copy(showQualityBadge = !_uiState.value.showQualityBadge)
-    }
-
-    fun setBadgeStyle(style: BadgeStyle) {
-        _uiState.value = _uiState.value.copy(badgeStyle = style)
-    }
-
-    fun toggleHiRes() {
-        _uiState.value = _uiState.value.copy(preferHiRes = !_uiState.value.preferHiRes)
-    }
-
-    fun toggleDolbyAtmos() {
-        _uiState.value = _uiState.value.copy(dolbyAtmos = !_uiState.value.dolbyAtmos)
-    }
-
-    fun setSampleRate(rate: SampleRate) {
-        _uiState.value = _uiState.value.copy(sampleRate = rate)
-    }
-
-    fun setBitDepth(depth: BitDepth) {
-        _uiState.value = _uiState.value.copy(bitDepth = depth)
-    }
-
+    /**
+     * Caps streaming on metered networks at the lowest quality.
+     *
+     * Data Saver is a separate flag from the mobile quality picker rather than a shortcut that
+     * overwrites it: turning the toggle off restores the user's own choice instead of silently
+     * pinning their mobile quality to High forever.
+     */
     fun toggleDataSaver() {
         val newState = !_uiState.value.dataSaverEnabled
-        // Data saver genuinely changes behaviour: it forces the lowest mobile bitrate, which is
-        // the whole point of the toggle. Both the flag and the resulting quality are persisted.
-        _uiState.value = _uiState.value.copy(
-            dataSaverEnabled = newState,
-            mobileQuality = if (newState) StreamQuality.LOW else StreamQuality.HIGH
-        )
-        persist {
-            settingsStore.putBoolean(SettingsStore.DATA_SAVER, newState)
-            settingsStore.putString(SettingsStore.MOBILE_QUALITY, _uiState.value.mobileQuality.name)
-        }
-    }
-
-    fun toggleFormatsExpanded() {
-        _uiState.value = _uiState.value.copy(formatsExpanded = !_uiState.value.formatsExpanded)
+        _uiState.value = _uiState.value.copy(dataSaverEnabled = newState)
+        persist { settingsStore.putBoolean(SettingsStore.DATA_SAVER, newState) }
     }
 }

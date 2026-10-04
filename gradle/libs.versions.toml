@@ -19,12 +19,20 @@ espressoCore = "3.5.1"
 appcompat = "1.6.1"
 material = "1.10.0"
 activityCompose = "1.10.0"
-composeBom = "2024.10.01"
+# Compose artifacts are pinned individually rather than through the BOM. The BOM was declared
+# here but never referenced from build.gradle.kts, so it silently constrained nothing — a
+# declared-but-unused version source is worse than none, because it reads as if it is in charge.
 composeUi = "1.7.5"
 composeMaterial3 = "1.3.1"
 composeMaterialIcons = "1.7.5"
 lifecycleRuntimeKtx = "2.8.7"
 ktor = "3.0.1"
+retrofit = "2.11.0"
+okhttp = "4.12.0"
+datastore = "1.1.1"
+junitJupiter = "5.10.3"
+mockk = "1.13.11"
+coroutines = "1.8.1"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -34,8 +42,10 @@ androidx-espresso-core = { group = "androidx.test.espresso", name = "espresso-co
 androidx-appcompat = { group = "androidx.appcompat", name = "appcompat", version.ref = "appcompat" }
 material = { group = "com.google.android.material", name = "material", version.ref = "material" }
 androidx-lifecycle-runtime-ktx = { group = "androidx.lifecycle", name = "lifecycle-runtime-ktx", version.ref = "lifecycleRuntimeKtx" }
+# collectAsStateWithLifecycle — stops the 44 screen-level flows from collecting while the app is
+# in the background (a stopped screen kept receiving player/DB emissions without this).
+androidx-lifecycle-runtime-compose = { group = "androidx.lifecycle", name = "lifecycle-runtime-compose", version.ref = "lifecycleRuntimeKtx" }
 androidx-activity-compose = { group = "androidx.activity", name = "activity-compose", version.ref = "activityCompose" }
-androidx-compose-bom = { group = "androidx.compose", name = "compose-bom", version.ref = "composeBom" }
 androidx-compose-ui = { group = "androidx.compose.ui", name = "ui", version.ref = "composeUi" }
 androidx-compose-ui-graphics = { group = "androidx.compose.ui", name = "ui-graphics", version.ref = "composeUi" }
 androidx-compose-ui-tooling = { group = "androidx.compose.ui", name = "ui-tooling", version.ref = "composeUi" }
@@ -60,6 +70,9 @@ androidx-palette = { group = "androidx.palette", name = "palette", version = "1.
 
 media3-exoplayer = { group = "androidx.media3", name = "media3-exoplayer", version.ref = "media3" }
 media3-exoplayer-dash = { group = "androidx.media3", name = "media3-exoplayer-dash", version.ref = "media3" }
+# Required for the Gaana source, whose stream_urls are HLS (.m3u8) master playlists.
+# Without this module DefaultMediaSourceFactory treats an .m3u8 as a progressive file and fails.
+media3-exoplayer-hls = { group = "androidx.media3", name = "media3-exoplayer-hls", version.ref = "media3" }
 media3-datasource-okhttp = { group = "androidx.media3", name = "media3-datasource-okhttp", version.ref = "media3" }
 media3-session = { group = "androidx.media3", name = "media3-session", version.ref = "media3" }
 
@@ -72,6 +85,18 @@ ktor-client-websockets = { group = "io.ktor", name = "ktor-client-websockets", v
 ktor-serialization-kotlinx-json = { group = "io.ktor", name = "ktor-serialization-kotlinx-json", version.ref = "ktor" }
 
 newpipeExtractor = { group = "com.github.TeamNewPipe", name = "NewPipeExtractor", version = "v0.24.6" }
+
+# --- Scaffold (com.manikyndan.crank) additions: Retrofit + OkHttp + DataStore + JUnit5/MockK ---
+retrofit-core = { group = "com.squareup.retrofit2", name = "retrofit", version.ref = "retrofit" }
+retrofit-kotlinx = { group = "com.squareup.retrofit2", name = "converter-kotlinx-serialization", version.ref = "retrofit" }
+okhttp-core = { group = "com.squareup.okhttp3", name = "okhttp", version.ref = "okhttp" }
+okhttp-logging = { group = "com.squareup.okhttp3", name = "logging-interceptor", version.ref = "okhttp" }
+datastore-preferences = { group = "androidx.datastore", name = "datastore-preferences", version.ref = "datastore" }
+kotlinx-coroutines-test = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-test", version.ref = "coroutines" }
+junit-jupiter = { group = "org.junit.jupiter", name = "junit-jupiter", version.ref = "junitJupiter" }
+mockk-unit = { group = "io.mockk", name = "mockk", version.ref = "mockk" }
+compose-ui-test-junit4 = { group = "androidx.compose.ui", name = "ui-test-junit4", version.ref = "composeUi" }
+compose-ui-test-manifest = { group = "androidx.compose.ui", name = "ui-test-manifest", version.ref = "composeUi" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

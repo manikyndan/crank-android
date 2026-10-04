@@ -57,11 +57,13 @@ interface DownloadRepository {
     fun downloadsArePaused(): Boolean
 
     /**
-     * Clears a failed download from the index so it can be re-requested.
+     * Re-queues a failed download from scratch.
      *
-     * The caller is responsible for re-issuing [downloadSong] with the full [Song], because
-     * the stream URL is not retained here and would otherwise be re-resolved against a stale
-     * request.
+     * Takes the whole [Song] rather than an id because the stream URL cannot be recovered from the
+     * index: Media3 holds a terminal FAILED state, so the request has to be evicted and rebuilt,
+     * which means re-resolving the track. The previous id-only signature left that second step to
+     * the caller, so a caller that forgot it cleared the failed entry and re-added nothing — the
+     * download disappeared from the list while its partial bytes stayed on disk.
      */
-    suspend fun retryDownload(songId: String)
+    suspend fun retryDownload(song: Song)
 }

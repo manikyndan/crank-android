@@ -1,19 +1,29 @@
 <?xml version="1.0" encoding="utf-8"?><!--
-   Sample data extraction rules file; uncomment and customize as necessary.
-   See https://developer.android.com/about/versions/12/backup-restore#xml-changes
-   for details.
+   Backup and device-transfer rules for Android 12+.
+
+   See backup_rules.xml for the reasoning. In short: `allowBackup` defaults to `true`, and with
+   these rules left as the Google sample template the whole Room database was being uploaded to
+   cloud backup and copied to new devices — including the listening history and search history the
+   Privacy screen offers to delete, and the `session_values` visitor identity.
 -->
 <data-extraction-rules>
     <cloud-backup>
-        <!-- TODO: Use <include> and <exclude> to control what is backed up.
-        <include .../>
-        <exclude .../>
-        -->
+        <exclude domain="database" path="crank_database" />
+        <exclude domain="database" path="crank_database-journal" />
+        <exclude domain="database" path="crank_database-wal" />
+        <exclude domain="database" path="crank_database-shm" />
+        <exclude domain="external" path="crank_downloads" />
+        <exclude domain="file" path="crank_downloads" />
     </cloud-backup>
-    <!--
+
+    <!-- Device transfer is treated the same as cloud backup: moving to a new phone should not
+         carry the previous owner's listening history, and the visitor id is device-scoped. -->
     <device-transfer>
-        <include .../>
-        <exclude .../>
+        <exclude domain="database" path="crank_database" />
+        <exclude domain="database" path="crank_database-journal" />
+        <exclude domain="database" path="crank_database-wal" />
+        <exclude domain="database" path="crank_database-shm" />
+        <exclude domain="external" path="crank_downloads" />
+        <exclude domain="file" path="crank_downloads" />
     </device-transfer>
-    -->
 </data-extraction-rules>

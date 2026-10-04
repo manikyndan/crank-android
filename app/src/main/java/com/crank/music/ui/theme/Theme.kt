@@ -4,6 +4,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
@@ -11,9 +12,13 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.unit.Density
 import androidx.core.view.WindowCompat
 
 // ═══════════════════════════════════════════════════════════════
@@ -127,6 +132,20 @@ internal data class CrankPalette(
     val navyBlue: Color,
     // ─── Semantic status colours, kept here so they can differ per theme too ───
     val error: Color,
+    /**
+     * Tinted background for a destructive/error card.
+     *
+     * A translucent wash of [error] over the theme background, so a red danger card is a pale pink
+     * panel in light mode instead of a near-black one — which is what a literal `Color(0xFF2A1010)`
+     * produced, and why those cards were unreadable with the Light theme selected.
+     */
+    val errorSurface: Color,
+    /** Softer [error] for secondary text inside a danger card, still legible on [errorSurface]. */
+    val errorMuted: Color,
+    /** Border for a danger card, at the alpha the design calls for. */
+    val errorBorder: Color,
+    /** Caution: high-data quality, a paused download, an elevated-band warning. */
+    val warning: Color,
     val success: Color,
     val heart: Color
 )
@@ -150,6 +169,11 @@ internal val DarkPalette = CrankPalette(
     cardGradientBottom = Color(0xFF000000),
     navyBlue = Color(0xFF2C2C2E),
     error = Color(0xFFE5484D),
+    // On black, the tint has to add light rather than remove it, so this is a red-black, not a wash.
+    errorSurface = Color(0xFF2A1010),
+    errorMuted = Color(0xFFFF8A80),
+    errorBorder = Color(0x4DE5484D),
+    warning = Color(0xFFFF9F0A),
     success = Color(0xFF30D158),
     heart = Color(0xFFE5484D)
 )
@@ -174,18 +198,78 @@ internal val LightPalette = CrankPalette(
     cardGradientBottom = Color(0xFFFFFFFF),
     navyBlue = Color(0xFFE5E5EA),
     error = Color(0xFFD70015),
+    // On white, a light pink wash: same role, opposite direction.
+    errorSurface = Color(0xFFFFEBEC),
+    errorMuted = Color(0xFFB3261E),
+    errorBorder = Color(0x33D70015),
+    warning = Color(0xFFB25000),
     success = Color(0xFF248A3D),
     heart = Color(0xFFD70015)
 )
 
 internal val LocalCrankPalette = staticCompositionLocalOf<CrankPalette> { DarkPalette }
 
+/**
+ * Builds the palette for [dark] with the user's accent substituted in.
+ *
+ * Only the accent-family entries change. Everything else — surfaces, text, dividers, status colours —
+ * is theme-dependent, not accent-dependent, so leaving those alone is what keeps a light accent from
+ * breaking contrast. [accentBright] is derived by lightening rather than taking the accent verbatim so
+ * gradients and highlights keep their relationship to the base colour.
+ */
+internal fun paletteFor(dark: Boolean, accent: Color?): CrankPalette {
+    val base = if (dark) DarkPalette else LightPalette
+    if (accent == null) return base
+    return base.copy(
+        accent = accent,
+        accentBright = lerp(base.accentBright, Color.White, if (dark) 0.18f else 0.1f),
+        heart = accent
+    )
+}
+
+/**
+ * Builds the Material scheme with the accent substituted in.
+ *
+ * `primary`/`secondary` carry the accent because that is what Material components read for switches,
+ * sliders, ripples and the segmented-button selection indicator. Without this the palette tokens
+ * would change colour while every Material widget stayed the old red — the two layers have to move
+ * together.
+ */
+private fun schemeFor(dark: Boolean, accent: Color?): ColorScheme {
+    val base = if (dark) DarkColorScheme else LightColorScheme
+    if (accent == null) return base
+    return base.copy(
+        primary = accent,
+        secondary = accent,
+        primaryContainer = accent,
+        tertiary = if (dark) lerp(accent, Color.White, 0.35f) else lerp(accent, Color.Black, 0.2f),
+    )
+}
+
 @Composable
 fun CrankandroidTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
+    /**
+     * The user's accent choice, or null to use the theme's own accent.
+     *
+     * This is the parameter whose absence made every appearance control decorative: the screen
+     * offered six presets and an HSL picker, wrote them into a ViewModel, and the theme never read
+     * them — so picking blue changed a preview swatch and nothing else.
+     */
+    accentArgb: Int? = null,
+    /**
+     * Multiplier applied to text size. 1f is the user's system setting.
+     *
+     * Implemented by scaling [LocalDensity.fontScale] rather than editing every `TextStyle`, which
+     * keeps the scaling correct for text that comes from Material components too — and means the
+     * setting cannot silently miss a style that forgot to opt in.
+     */
+    typographyScale: Float = 1f,
     content: @Composable () -> Unit
 ) {
     val view = LocalView.current
+    val accent = accentArgb?.let { Color(it) }
+
     if (!view.isInEditMode) {
         SideEffect {
             val activity = view.context as? ComponentActivity ?: return@SideEffect
@@ -217,21 +301,44 @@ fun CrankandroidTheme(
         }
     }
 
+    val density = LocalDensity.current
+    val scaledDensity = remember(density, typographyScale) {
+        Density(density.density, density.fontScale * typographyScale.coerceIn(MIN_SCALE, MAX_SCALE))
+    }
+
     CompositionLocalProvider(
-        LocalCrankPalette provides if (darkTheme) DarkPalette else LightPalette
+        LocalCrankPalette provides paletteFor(darkTheme, accent),
+        LocalDensity provides scaledDensity,
     ) {
         MaterialTheme(
-            colorScheme = if (darkTheme) DarkColorScheme else LightColorScheme,
+            colorScheme = schemeFor(darkTheme, accent),
             typography = CrankTypography,
             content = content
         )
     }
 }
 
+/**
+ * Clamps for the typography scale.
+ *
+ * The low bound stops a future mis-set value from collapsing text to nothing; the high bound matches
+ * roughly the largest accessibility font size, past which text starts clipping in this app's fixed
+ * layouts (the bottom bar labels and the Now Playing transport row are the first to go).
+ */
+private const val MIN_SCALE = 0.85f
+private const val MAX_SCALE = 1.6f
+
 @Composable
 fun CrankTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
+    accentArgb: Int? = null,
+    typographyScale: Float = 1f,
     content: @Composable () -> Unit
 ) {
-    CrankandroidTheme(darkTheme = darkTheme, content = content)
+    CrankandroidTheme(
+        darkTheme = darkTheme,
+        accentArgb = accentArgb,
+        typographyScale = typographyScale,
+        content = content
+    )
 }

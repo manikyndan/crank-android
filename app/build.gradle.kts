@@ -114,6 +114,62 @@ android {
             isReturnDefaultValues = true
         }
     }
+
+    /**
+     * Lint is a build gate, not advice.
+     *
+     * See the promoted/disabled check lists inside for what is enforced and what is accepted.
+     */
+    lint {
+        abortOnError = true
+        // A warning is still printed but does not fail the build; only the promoted checks below do.
+        warningsAsErrors = false
+        // Never let the gate pass because a check crashed or was superseded.
+        checkDependencies = true
+        // Surface the full picture in CI logs rather than only the first offender.
+        textReport = true
+        htmlReport = true
+
+        // Promoted from warning to error. Each caught a real regression in this codebase and each is
+        // now at zero findings, so the gate only fires on a new violation:
+        //   UnusedResources        — dead strings outlived the UI that referenced them.
+        //   UseKtx                 — `Uri.parse` / `edit().apply()` where androidx-core extensions exist.
+        //   UnsafeOptInUsageError  — using a Media3 `@UnstableApi` symbol without opting in was a real
+        //                            build failure here, and it is how a dependency bump turns into a
+        //                            silent behavioural change.
+        error.add("UnusedResources")
+        error.add("UseKtx")
+        error.add("UnsafeOptInUsageError")
+
+        // Reported but not failing. These stay in the lint output on purpose: silencing a check would
+        // also hide its *next* finding, and the point of a gate is to keep the signal visible while
+        // only stopping the build for things that are unambiguously wrong.
+        //
+        //   GradleDependency / NewerVersionAvailable / AndroidGradlePluginVersion
+        //                          — upgrade suggestions. Following them is a deliberate, tested
+        //                            decision; they should be readable, not blocking.
+        //   ExportedService        — the Media3 session service is exported on purpose: the Android
+        //                            platform, System UI, Bluetooth media buttons and Android Auto all
+        //                            bind to it from outside the app, so an `android:permission` guard
+        //                            would break lock-screen and headset controls rather than secure
+        //                            anything. Access control lives where it can actually see the
+        //                            caller — the package / uid allowlist in
+        //                            `CrankSessionCallback.onConnect`, which rejects every controller
+        //                            that is not this app or a trusted system component. Lint cannot see
+        //                            across that call. Kept enabled so a *second* exported service
+        //                            would still show up.
+        //   UnusedAttribute        — a manifest attribute with no effect at the current targetSdk.
+
+        // Suppressed outright. These are pure noise for this module:
+        //   IconLauncherShape / IconDuplicates
+        //                          — the launcher and round icon files are byte-identical, which is a
+        //                            deliberate artwork decision rather than a defect.
+        //   SetJavaScriptEnabled   — required by the BotGuard WebView, which must execute its token
+        //                            script. There is no narrower way to run it.
+        disable.add("IconLauncherShape")
+        disable.add("IconDuplicates")
+        disable.add("SetJavaScriptEnabled")
+    }
     buildFeatures {
         compose = true
         buildConfig = true
@@ -135,9 +191,16 @@ android {
     // state rather than silently failing.
     val auddApiToken: String = localProps.getProperty("AUDD_API_TOKEN") ?: ""
 
+    // Where the app looks for a published release manifest. There is no release host yet, and this
+    // deliberately does not default to a placeholder URL: an unreachable guess would make the update
+    // screen report "couldn't check" for the wrong reason. Empty means the feature honestly reports
+    // that it cannot check, and supplying a URL in local.properties enables it with no code change.
+    val updateManifestUrl: String = localProps.getProperty("CRANK_UPDATE_MANIFEST_URL") ?: ""
+
     defaultConfig {
         buildConfigField("String", "INNERTUBE_API_KEY", "\"$innerTubeApiKey\"")
         buildConfigField("String", "AUDD_API_TOKEN", "\"$auddApiToken\"")
+        buildConfigField("String", "CRANK_UPDATE_MANIFEST_URL", "\"$updateManifestUrl\"")
     }
 }
 
@@ -164,11 +227,41 @@ androidComponents {
     }
 }
 
+/**
+ * Reports whether the BotGuard asset is present when a build is assembled.
+ *
+ * `po_token.html` cannot be committed (upstream lists it as sensitive), so it is absent from
+ * every fresh checkout. A build without it still installs and plays *some* tracks, but YouTube
+ * rejects most streams with HTTP 403 — a failure that only shows up at play time, on a user's
+ * device, long after the build looked successful.
+ *
+ * Deliberately non-fatal by default: failing here would break every build for anyone without the
+ * asset, including CI. The warning surfaces the problem where it is cheapest to notice, and
+ * `-PrequireBotGuard=true` escalates it to a hard failure for a pipeline expected to ship it.
+ */
+val verifyBotGuardAsset by tasks.registering {
+    val asset = layout.projectDirectory.file("src/main/assets/po_token.html")
+    val requireAsset = providers.gradleProperty("requireBotGuard").orNull == "true"
+    outputs.upToDateWhen { false }
+    doLast {
+        if (!asset.asFile.exists()) {
+            val message = "BotGuard asset 'app/src/main/assets/po_token.html' is MISSING. " +
+                "Playback cannot mint Proof-of-Origin tokens without it, so most tracks will be " +
+                "rejected with HTTP 403. Supply the asset locally before shipping this APK."
+            if (requireAsset) error(message) else logger.warn("WARNING: $message")
+        }
+    }
+}
+
+tasks.matching { it.name.startsWith("assemble") || it.name.startsWith("bundle") }
+    .configureEach { finalizedBy(verifyBotGuardAsset) }
+
 dependencies {
     implementation(libs.androidx.appcompat)
     implementation(libs.material)
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
+    implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.compose.ui)
     implementation(libs.androidx.compose.ui.graphics)
@@ -199,6 +292,9 @@ dependencies {
     // Media3 ExoPlayer - Audio Playback & Downloads
     implementation(libs.media3.exoplayer)
     implementation(libs.media3.exoplayer.dash)
+    // HLS: the Gaana source returns .m3u8 master playlists, and Media3 only recognises
+    // them when this module is on the classpath (see PlayerModule's DefaultMediaSourceFactory).
+    implementation(libs.media3.exoplayer.hls)
     implementation(libs.media3.datasource.okhttp)
     implementation(libs.media3.session)
 
@@ -214,12 +310,27 @@ dependencies {
     // NewPipe Extractor
     implementation(libs.newpipeExtractor)
 
+    // Scaffold (com.manikyndan.crank) sample graph: Retrofit + OkHttp + DataStore.
+    // Kept additive — production code uses Ktor/NewPipe/InnerTube, not Retrofit.
+    implementation(libs.retrofit.core)
+    implementation(libs.retrofit.kotlinx)
+    implementation(libs.okhttp.core)
+    implementation(libs.okhttp.logging)
+    implementation(libs.datastore.preferences)
+
     testImplementation(libs.junit)
     // MockEngine — lets the lyrics source be exercised over a canned HTTP response, so the
     // "response thrown away during parsing" class of bug is caught without a network.
     testImplementation(libs.ktor.client.mock)
+    // Scaffold (com.manikyndan.crank) tests: JUnit5 + MockK + coroutines-test.
+    testImplementation(libs.junit.jupiter)
+    testImplementation(libs.mockk.unit)
+    testImplementation(libs.kotlinx.coroutines.test)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
+    // Scaffold Compose UI tests.
+    androidTestImplementation(libs.compose.ui.test.junit4)
+    debugImplementation(libs.compose.ui.test.manifest)
     // MigrationTestHelper — verifies each Migration against the exported schema
     // snapshots in app/schemas, so a broken upgrade fails in CI rather than on a
     // user's device.

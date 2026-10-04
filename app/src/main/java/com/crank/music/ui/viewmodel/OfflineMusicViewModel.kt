@@ -1,9 +1,14 @@
 package com.crank.music.ui.viewmodel
 
 import android.content.Context
+import androidx.annotation.OptIn
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import androidx.media3.common.util.UnstableApi
+import androidx.media3.datasource.cache.Cache
+import androidx.media3.exoplayer.offline.DownloadIndex
 import com.crank.music.core.rethrowIfCancellation
+import com.crank.music.data.local.DownloadLocations
 import com.crank.music.data.local.SongDao
 import com.crank.music.data.local.toDomainModel
 import com.crank.music.domain.model.Song
@@ -14,27 +19,14 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import javax.inject.Inject
-
-enum class DownloadQuality(val label: String, val sizeMultiplier: Float) {
-    LOW("Low (96 kbps)", 0.5f),
-    MEDIUM("Medium (160 kbps)", 1.0f),
-    HIGH("High (320 kbps)", 2.0f),
-    LOSSLESS("Lossless (FLAC)", 5.0f)
-}
-
-enum class StorageLimit(val label: String, val bytes: Long) {
-    GB_1("1 GB", 1_073_741_824L),
-    GB_5("5 GB", 5_368_709_120L),
-    GB_10("10 GB", 10_737_418_240L),
-    UNLIMITED("Unlimited", Long.MAX_VALUE)
-}
 
 data class OfflineItem(
     val id: String,
@@ -69,12 +61,6 @@ data class OfflineUiState(
     val songs: List<OfflineItem> = emptyList(),
     /** Playlists the user created that contain at least one downloaded song. */
     val playlists: List<OfflineItem> = emptyList(),
-    val autoDownloadOnWifi: Boolean = false,
-    val autoDownloadLiked: Boolean = false,
-    val autoDownloadArtistReleases: Boolean = false,
-    val autoDownloadDailyMix: Boolean = false,
-    val downloadQuality: DownloadQuality = DownloadQuality.HIGH,
-    val storageLimit: StorageLimit = StorageLimit.GB_10,
     /**
      * Transfers Media3 is currently tracking, with real byte progress. Empty when nothing is
      * downloading — previously this was four hardcoded rows that never changed.
@@ -107,10 +93,17 @@ data class OfflineUiState(
  * backed by real transfer state.
  */
 @HiltViewModel
+@OptIn(UnstableApi::class)
 class OfflineMusicViewModel @Inject constructor(
     @param:ApplicationContext private val context: Context,
     private val downloadRepository: DownloadRepository,
     private val songDao: SongDao,
+    // `DownloadIndex` and `Cache` are both flagged `@UnstableApi` by Media3. They are the only
+    // honest source for real download sizes and cache usage — the alternative is walking a
+    // directory that Media3 does not use (which is what produced empty sizes) or inventing numbers.
+    // The opt-in is scoped to this class.
+    private val downloadIndex: DownloadIndex,
+    private val cache: Cache,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(OfflineUiState())
@@ -169,12 +162,18 @@ class OfflineMusicViewModel @Inject constructor(
     private fun observeDownloads() {
         viewModelScope.launch {
             try {
-                downloadRepository.getDownloadedSongs().collect { songs ->
-                    _uiState.value = _uiState.value.copy(
-                        songs = songs.map { it.toOfflineItem() },
-                        isLoading = false,
-                    )
-                }
+                downloadRepository.getDownloadedSongs()
+                    // Required, not cosmetic: building each row reads the Media3 download index,
+                    // which is a blocking database call. Without flowOn it ran on the main thread
+                    // once per song on every emission.
+                    .map { songs -> songs.map { it.toOfflineItem() } }
+                    .flowOn(Dispatchers.IO)
+                    .collect { items ->
+                        _uiState.value = _uiState.value.copy(
+                            songs = items,
+                            isLoading = false,
+                        )
+                    }
             } catch (e: Exception) {
                 e.rethrowIfCancellation()
                 _uiState.value = _uiState.value.copy(isLoading = false)
@@ -182,74 +181,46 @@ class OfflineMusicViewModel @Inject constructor(
         }
     }
 
-    /**
-     * Real storage figures.
-     *
-     * `totalBytes` is the volume the app's files live on and `usedBytes` is what the app's own
-     * directory actually occupies — measured by walking it, not guessed.
-     */
-    private fun loadStorageUsage() {
-        viewModelScope.launch {
-            val (total, used) = withContext(Dispatchers.IO) {
-                val filesDir = context.filesDir
-                val totalBytes = filesDir.totalSpace
-                val usedBytes = filesDir.walkTopDown()
-                    .filter { it.isFile }
-                    .sumOf { it.length() }
-                totalBytes to usedBytes
-            }
-            _uiState.value = _uiState.value.copy(totalStorage = total, usedStorage = used)
-        }
-    }
-
     private fun Song.toOfflineItem(): OfflineItem {
-        val file = resolveLocalFile(id)
+        val download = runCatching { downloadIndex.getDownload(id) }.getOrNull()
         return OfflineItem(
             id = id,
             title = title,
             subtitle = artistName,
             artworkUrl = artworkUrl,
-            fileSize = file?.let { formatBytes(it.length()) } ?: "—",
-            downloadDate = file?.let { formatDate(it.lastModified()) } ?: "",
+            fileSize = download?.bytesDownloaded
+                ?.takeIf { it > 0L }
+                ?.let { formatBytes(it) }
+                ?: "—",
+            downloadDate = download?.updateTimeMs
+                ?.takeIf { it > 0L }
+                ?.let { formatDate(it) }
+                ?: "",
             type = "song",
         )
     }
 
     /**
-     * Finds the file backing a download.
+     * Real storage figures for the volume downloads live on.
      *
-     * Media3 stores downloads under its own directory using the download id, so the id is
-     * searched for directly; if that misses, nothing is reported rather than a guessed size.
+     * `used` is the bytes Media3 actually holds for downloads ([Cache.getCacheSpace]), not a walk of
+     * the app's *internal* directory — which is what this used to measure, while downloads were
+     * written to external storage. The result was a bar showing the app's internal files against the
+     * internal volume's total, which reported nothing about downloads at all.
+     *
+     * Both figures are read on [Dispatchers.IO]: `getCacheSpace` queries the cache database, and
+     * `totalSpace` hits the filesystem.
      */
-    private fun resolveLocalFile(songId: String): File? {
-        val root = File(context.filesDir, "downloads")
-        if (!root.exists()) return null
-        return root.walkTopDown().firstOrNull { it.isFile && it.name.contains(songId) }
+    private fun loadStorageUsage() {
+        viewModelScope.launch {
+            val (total, used) = withContext(Dispatchers.IO) {
+                val volume = DownloadLocations.directory(context)
+                volume.totalSpace to cache.cacheSpace
+            }
+            _uiState.value = _uiState.value.copy(totalStorage = total, usedStorage = used)
+        }
     }
 
-    fun toggleAutoDownloadOnWifi(enabled: Boolean) {
-        _uiState.value = _uiState.value.copy(autoDownloadOnWifi = enabled)
-    }
-
-    fun toggleAutoDownloadLiked(enabled: Boolean) {
-        _uiState.value = _uiState.value.copy(autoDownloadLiked = enabled)
-    }
-
-    fun toggleAutoDownloadArtistReleases(enabled: Boolean) {
-        _uiState.value = _uiState.value.copy(autoDownloadArtistReleases = enabled)
-    }
-
-    fun toggleAutoDownloadDailyMix(enabled: Boolean) {
-        _uiState.value = _uiState.value.copy(autoDownloadDailyMix = enabled)
-    }
-
-    fun setDownloadQuality(quality: DownloadQuality) {
-        _uiState.value = _uiState.value.copy(downloadQuality = quality)
-    }
-
-    fun setStorageLimit(limit: StorageLimit) {
-        _uiState.value = _uiState.value.copy(storageLimit = limit)
-    }
 
     fun toggleSection(section: String) {
         _uiState.value = _uiState.value.copy(
@@ -308,17 +279,17 @@ class OfflineMusicViewModel @Inject constructor(
     }
 
     /**
-     * Clears a failed entry from the index so it can be requested again.
+     * Re-queues a failed download.
      *
-     * Media3 holds a terminal FAILED state, so the row must be evicted first. The song is
-     * re-requested from the local table, which is the only place the metadata survives.
+     * Media3 holds a terminal FAILED state, so the entry is evicted and rebuilt inside the
+     * repository. The song is looked up from the local table, which is the only place its metadata
+     * survives.
      */
     fun retryDownload(id: String) {
         viewModelScope.launch {
             try {
                 val song = withContext(Dispatchers.IO) { songDao.getSongById(id) } ?: return@launch
-                downloadRepository.retryDownload(id)
-                downloadRepository.downloadSong(song.toDomainModel())
+                downloadRepository.retryDownload(song.toDomainModel())
             } catch (e: Exception) {
                 e.rethrowIfCancellation()
             }

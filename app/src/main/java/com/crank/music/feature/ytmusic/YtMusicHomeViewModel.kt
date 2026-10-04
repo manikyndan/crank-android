@@ -137,8 +137,10 @@ class YtMusicHomeViewModel @Inject constructor(
                 val statsDeferred = async(Dispatchers.IO) {
                     Triple(
                         runCatching { songDao.getTopArtist() }.getOrNull(),
-                        runCatching { songDao.getTotalListeningMinutes() }.getOrDefault(0.0),
-                        runCatching { songDao.getHistoryCount() }.getOrDefault(0),
+                        // Derived from listened time, not nominal duration: `durationMs` counted a
+                        // full song even when it was skipped.
+                        runCatching { songDao.getTotalListenedMs() }.getOrDefault(0L) / 60_000.0,
+                        runCatching { songDao.getTotalPlayCount() }.getOrDefault(0),
                     )
                 }
                 // The single restorable playback position: the only genuine

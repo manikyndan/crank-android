@@ -28,7 +28,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -59,7 +59,7 @@ fun SearchScreen(
     onSongSelectWithContext: (Song, List<Song>) -> Unit = { song, _ -> onSongSelect(song) },
     onAlbumClick: (Album) -> Unit = {}
 ) {
-    val uiState by searchViewModel.uiState.collectAsState()
+    val uiState by searchViewModel.uiState.collectAsStateWithLifecycle()
     val categories = listOf("All", "Songs", "Artists", "Albums")
 
     LaunchedEffect(initialQuery) {

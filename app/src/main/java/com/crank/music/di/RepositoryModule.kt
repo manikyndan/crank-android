@@ -2,7 +2,7 @@ package com.crank.music.di
 
 import com.crank.music.data.local.LocalDataSourceImpl
 import com.crank.music.data.remote.RemoteDataSource
-import com.crank.music.data.remote.YouTubeRemoteDataSource
+import com.crank.music.data.remote.RemoteSourceRouter
 import com.crank.music.data.repository.DownloadRepositoryImpl
 import com.crank.music.data.repository.MusicRepositoryImpl
 import com.crank.music.domain.repository.DownloadRepository
@@ -35,7 +35,7 @@ abstract class RepositoryModule {
     @Binds
     @Singleton
     abstract fun bindRemoteDataSource(
-        youtubeRemoteDataSource: YouTubeRemoteDataSource
+        router: RemoteSourceRouter
     ): RemoteDataSource
 
     @Binds

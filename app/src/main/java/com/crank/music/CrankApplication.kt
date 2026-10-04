@@ -9,9 +9,14 @@ import coil3.ImageLoader
 import coil3.PlatformContext
 import coil3.SingletonImageLoader
 import com.crank.music.data.remote.NewPipeDownloader
+import com.crank.music.data.remote.StreamResolver
 import com.crank.music.data.remote.potoken.PoTokenWebView
 import com.crank.music.service.UpdateNotificationHelper
 import dagger.hilt.android.HiltAndroidApp
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import org.schabi.newpipe.extractor.NewPipe
 import javax.inject.Inject
 
@@ -20,6 +25,18 @@ class CrankApplication : Application(), SingletonImageLoader.Factory {
 
     @Inject
     lateinit var imageLoader: ImageLoader
+
+    @Inject
+    lateinit var streamResolver: StreamResolver
+
+    /**
+     * Application-lifetime scope for work that must outlive any screen.
+     *
+     * `SupervisorJob` so one failed warm-up cannot cancel the other, and `Dispatchers.Default`
+     * because the only thing this currently runs is I/O-bound prefetching that already hops to
+     * its own dispatcher where the main thread is required (WebView construction).
+     */
+    private val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     override fun onCreate() {
         super.onCreate()
@@ -32,6 +49,15 @@ class CrankApplication : Application(), SingletonImageLoader.Factory {
         // first-byte HTTP 403 that only shows up the first time a track is played.
         if (!PoTokenWebView.isAssetPresent(this)) {
             Log.w(TAG, PoTokenWebView.missingAssetMessage())
+        }
+
+        // StreamResolver.init() warms the visitor id and the BotGuard WebView. It was written for
+        // exactly this purpose but had no caller, so every cold start paid the full cost on the
+        // first play (visitor-id round trip, then WebView construction) instead of during launch
+        // idle time. Best-effort by contract: a failure degrades which clients can serve a
+        // stream and must never block startup.
+        applicationScope.launch {
+            streamResolver.init()
         }
     }
 

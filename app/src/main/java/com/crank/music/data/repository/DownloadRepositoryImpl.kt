@@ -1,8 +1,8 @@
 package com.crank.music.data.repository
 
-import android.net.Uri
 import android.util.Log
 import androidx.annotation.OptIn
+import androidx.core.net.toUri
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.offline.Download
 import androidx.media3.exoplayer.offline.DownloadManager
@@ -75,7 +75,15 @@ class DownloadRepositoryImpl @Inject constructor(
 
             Log.d("CRANK_DOWNLOAD", "Downloading ${song.title} from: ${streamUrl.take(80)}...")
 
-            val request = DownloadRequest.Builder(song.id, Uri.parse(streamUrl))
+            val request = DownloadRequest.Builder(song.id, streamUrl.toUri())
+                // The cache key is the one thing the download and the playback path MUST agree on.
+                // Media3 stores the download under `customCacheKey` when it is set and keys the read
+                // path on the same field, so `song.id` here matches `MediaItem.Builder()
+                // .setCustomCacheKey(song.id)` in PlayerViewModel. Without it the key defaulted to the
+                // resolved URL — which carries expiring signature parameters and so differed on every
+                // resolve — and a "downloaded" track still went to the network and failed outright
+                // with no connectivity.
+                .setCustomCacheKey(song.id)
                 .setData(song.title.toByteArray(Charsets.UTF_8))
                 .build()
 
@@ -390,11 +398,21 @@ class DownloadRepositoryImpl @Inject constructor(
 
     override fun downloadsArePaused(): Boolean = downloadManager.downloadsPaused
 
-    override suspend fun retryDownload(songId: String) {
-        // A failed download is re-queued by removing and re-adding it, because Media3 keeps
-        // the terminal FAILED state in the index otherwise. The original stream URL is not
-        // cached here, so the caller re-issues downloadSong with the Song model.
-        downloadManager.removeDownload(songId)
+    /**
+     * Re-queues a failed download.
+     *
+     * Takes the whole [Song] rather than just its id, because a retry is not a resume: Media3 keeps
+     * the terminal FAILED state in its index, so the entry has to be evicted and rebuilt — and
+     * rebuilding it needs a fresh stream URL, since the one originally used has expired.
+     *
+     * The previous id-only signature removed the entry and left re-enqueueing to the caller. A caller
+     * that did not remember to re-issue the download deleted the failed row and changed nothing,
+     * which is precisely the "Retry does nothing" behaviour being fixed.
+     */
+    override suspend fun retryDownload(song: Song) {
+        runCatching { downloadManager.removeDownload(song.id) }
+            .onFailure { Log.w("CRANK_DOWNLOAD", "Could not clear failed download ${song.id}", it) }
+        downloadSong(song)
     }
 
     private fun mapState(state: Int): DownloadState {

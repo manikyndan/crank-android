@@ -1,13 +1,28 @@
 <?xml version="1.0" encoding="utf-8"?><!--
-   Sample backup rules file; uncomment and customize as necessary.
-   See https://developer.android.com/guide/topics/data/autobackup
-   for details.
-   Note: This file is ignored for devices older than API 31
-   See https://developer.android.com/about/versions/12/backup-restore
+   Backup rules for Android 11 and lower.
+
+   `allowBackup` was left at the default `true` while these files were still the untouched Google
+   samples, which means the whole Room database — listening history, search history, likes,
+   playlists, and the `session_values` table that holds the YouTube visitor identity — was being
+   uploaded to the user's cloud backup and copied to any new device during a transfer.
+
+   Listening history and search history are exactly the data this app's Privacy screen promises to
+   delete on request and promises not to record when the user turns history off. Backing them up
+   silently contradicts both promises, and the visitor id is a credential-like identifier that
+   should not leave the device.
+
+   The rules therefore exclude the database and the download cache outright rather than trying to
+   pick tables out of a single SQLite file, which is not possible at file granularity.
+
+   Note: ignored on API 31+; see data_extraction_rules.xml for the equivalent.
 -->
 <full-backup-content>
-    <!--
-   <include domain="sharedpref" path="."/>
-   <exclude domain="sharedpref" path="device.xml"/>
--->
+    <exclude domain="database" path="crank_database" />
+    <exclude domain="database" path="crank_database-journal" />
+    <exclude domain="database" path="crank_database-wal" />
+    <exclude domain="database" path="crank_database-shm" />
+    <!-- Downloaded audio is re-downloadable and can be hundreds of megabytes; backing it up would
+         burn the user's quota to store something the app can fetch again. -->
+    <exclude domain="external" path="crank_downloads" />
+    <exclude domain="file" path="crank_downloads" />
 </full-backup-content>

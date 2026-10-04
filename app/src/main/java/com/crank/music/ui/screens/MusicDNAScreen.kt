@@ -55,7 +55,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -88,13 +88,15 @@ import com.crank.music.ui.theme.CharcoalSurface
 import com.crank.music.ui.theme.GoldDark
 import com.crank.music.ui.theme.GoldMuted
 import com.crank.music.ui.theme.ObsidianBlack
+import com.crank.music.ui.theme.ErrorRed
+import com.crank.music.ui.theme.NavyBlue
+import com.crank.music.ui.theme.SuccessGreen
 import com.crank.music.ui.theme.TextSecondary
 import com.crank.music.ui.theme.TextTertiary
 import com.crank.music.ui.theme.WarmWhite
 import com.crank.music.ui.viewmodel.Badge
 import com.crank.music.ui.viewmodel.HeatmapCell
 import com.crank.music.ui.viewmodel.MusicDnaUiState
-import com.crank.music.ui.viewmodel.RadarDimension
 import com.crank.music.ui.viewmodel.StatsViewModel
 import com.crank.music.ui.viewmodel.TimePeriod
 import com.crank.music.ui.viewmodel.TimelinePoint
@@ -110,7 +112,7 @@ fun MusicDNAScreen(
     statsViewModel: StatsViewModel = hiltViewModel(),
     onBackClick: () -> Unit = {}
 ) {
-    val uiState by statsViewModel.uiState.collectAsState()
+    val uiState by statsViewModel.uiState.collectAsStateWithLifecycle()
     val view = LocalView.current
     var showBadgeDetail by remember { mutableStateOf<Badge?>(null) }
 
@@ -169,18 +171,9 @@ fun MusicDNAScreen(
                 return@LazyColumn
             }
 
-            if (uiState.radarDimensions.isNotEmpty()) {
-                item {
-                    Spacer(modifier = Modifier.height(8.dp))
-                    RadarChartSection(
-                        dimensions = uiState.radarDimensions,
-                        onDimensionClick = { dimension ->
-                            statsViewModel.selectDimension(dimension)
-                            view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
-                        }
-                    )
-                }
-            }
+            // The radar chart is gone. `radarDimensions` was only ever assigned `emptyList()`, so the
+            // section could never render anything, and the chart previously drew a fixed shape from
+            // hardcoded constants. The metrics below are the ones derived from real history.
 
             item {
                 Spacer(modifier = Modifier.height(24.dp))
@@ -253,152 +246,6 @@ private fun EmptyDnaState() {
     }
 }
 
-@Composable
-private fun RadarChartSection(
-    dimensions: List<RadarDimension>,
-    onDimensionClick: (RadarDimension) -> Unit
-) {
-    // Hoisted out of the Canvas draw lambdas, which are not @Composable scopes.
-    val accentColor = ChampagneGold
-    val animationProgress = remember { Animatable(0f) }
-
-    LaunchedEffect(Unit) {
-        animationProgress.animateTo(
-            targetValue = 1f,
-            animationSpec = tween(1200, easing = FastOutSlowInEasing)
-        )
-    }
-
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 20.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        Text(
-            text = "Sonic Profile",
-            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-            color = WarmWhite
-        )
-        Spacer(modifier = Modifier.height(16.dp))
-
-        Box(
-            modifier = Modifier
-                .size(280.dp)
-                .shadow(16.dp, CircleShape)
-                .clip(CircleShape)
-                .background(CharcoalSurface)
-                .drawBehind {
-                    val centerX = size.width / 2
-                    val centerY = size.height / 2
-                    val maxRadius = size.minDimension / 2 - 20.dp.toPx()
-
-                    for (ring in 1..4) {
-                        val radius = maxRadius * ring / 4f
-                        drawCircle(
-                            color = Color(0xFF2A2A2A),
-                            radius = radius,
-                            style = Stroke(1.dp.toPx())
-                        )
-                    }
-
-                    for (i in dimensions.indices) {
-                        val angle = (i * 360f / dimensions.size - 90f) * (Math.PI / 180f).toFloat()
-                        val endX = centerX + cos(angle.toDouble()).toFloat() * maxRadius
-                        val endY = centerY + sin(angle.toDouble()).toFloat() * maxRadius
-                        drawLine(
-                            color = Color(0xFF2A2A2A),
-                            start = Offset(centerX, centerY),
-                            end = Offset(endX, endY),
-                            strokeWidth = 1.dp.toPx()
-                        )
-                    }
-
-                    val path = Path()
-                    dimensions.forEachIndexed { index, dim ->
-                        val angle = (index * 360f / dimensions.size - 90f) * (Math.PI / 180f).toFloat()
-                        val radius = maxRadius * dim.value * animationProgress.value
-                        val x = centerX + cos(angle.toDouble()).toFloat() * radius
-                        val y = centerY + sin(angle.toDouble()).toFloat() * radius
-                        if (index == 0) path.moveTo(x, y) else path.lineTo(x, y)
-                    }
-                    path.close()
-
-                    drawPath(
-                        path = path,
-                        brush = Brush.radialGradient(
-                            colors = listOf(
-                                accentColor.copy(alpha = 0.4f),
-                                accentColor.copy(alpha = 0.1f)
-                            )
-                        )
-                    )
-                    drawPath(
-                        path = path,
-                        color = accentColor,
-                        style = Stroke(2.dp.toPx(), cap = StrokeCap.Round)
-                    )
-
-                    dimensions.forEachIndexed { index, dim ->
-                        val angle = (index * 360f / dimensions.size - 90f) * (Math.PI / 180f).toFloat()
-                        val radius = maxRadius * dim.value * animationProgress.value
-                        val x = centerX + cos(angle.toDouble()).toFloat() * radius
-                        val y = centerY + sin(angle.toDouble()).toFloat() * radius
-                        drawCircle(
-                            color = accentColor,
-                            radius = 5.dp.toPx(),
-                            center = Offset(x, y)
-                        )
-                        drawCircle(
-                            color = Color.White.copy(alpha = 0.4f),
-                            radius = 3.dp.toPx(),
-                            center = Offset(x, y)
-                        )
-                    }
-                },
-            contentAlignment = Alignment.Center
-        ) { }
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        LazyRow(
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            contentPadding = PaddingValues(horizontal = 8.dp)
-        ) {
-            items(dimensions) { dim ->
-                val animatedValue by animateFloatAsState(
-                    targetValue = dim.value * animationProgress.value,
-                    animationSpec = tween(800, easing = FastOutSlowInEasing),
-                    label = "radar_value"
-                )
-                Surface(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(12.dp))
-                        .clickable { onDimensionClick(dim) },
-                    color = CharcoalSurface,
-                    shape = RoundedCornerShape(12.dp)
-                ) {
-                    Column(
-                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        Text(text = dim.icon, fontSize = 18.sp)
-                        Text(
-                            text = "${(animatedValue * 100).toInt()}%",
-                            style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
-                            color = ChampagneGold
-                        )
-                        Text(
-                            text = dim.name,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = TextSecondary
-                        )
-                    }
-                }
-            }
-        }
-    }
-}
 
 @Composable
 private fun StatsCardsSection(stats: List<com.crank.music.ui.viewmodel.StatCard>) {
@@ -459,13 +306,13 @@ private fun AnimatedStatCard(stat: com.crank.music.ui.viewmodel.StatCard) {
                         Icon(
                             imageVector = if (stat.trend > 0) Icons.Default.ArrowUpward else Icons.Default.ArrowDownward,
                             contentDescription = null,
-                            tint = if (stat.trend > 0) Color(0xFF4CAF50) else Color(0xFFFF5252),
+                            tint = if (stat.trend > 0) SuccessGreen else ErrorRed,
                             modifier = Modifier.size(14.dp)
                         )
                         Text(
                             text = "${ kotlin.math.abs(stat.trend).toInt() }%",
                             style = MaterialTheme.typography.labelSmall,
-                            color = if (stat.trend > 0) Color(0xFF4CAF50) else Color(0xFFFF5252)
+                            color = if (stat.trend > 0) SuccessGreen else ErrorRed
                         )
                     }
                 }
@@ -554,10 +401,10 @@ private fun HeatmapSection(
                                     .background(
                                         Brush.horizontalGradient(
                                             colors = listOf(
-                                                Color(0xFF1A1A1A),
+                                                CharcoalElevated,
                                                 if (intensity > 0.1f)
                                                     ChampagneGold.copy(alpha = intensity * 0.9f)
-                                                else Color(0xFF1A1A1A)
+                                                else CharcoalElevated
                                             )
                                         )
                                     )
@@ -684,7 +531,7 @@ private fun TimelineSection(
                                 .weight(1f)
                                 .height(24.dp)
                                 .clip(RoundedCornerShape(4.dp))
-                                .background(Color(0xFF1A1A1A))
+                                .background(CharcoalElevated)
                         ) {
                             Box(
                                 modifier = Modifier
@@ -780,7 +627,7 @@ private fun BadgeItem(
             .aspectRatio(0.85f)
             .clip(RoundedCornerShape(14.dp))
             .clickable { onClick() },
-        color = if (badge.isEarned) CharcoalElevated else Color(0xFF151515),
+        color = if (badge.isEarned) CharcoalElevated else CharcoalSurface,
         shape = RoundedCornerShape(14.dp)
     ) {
         Box(
@@ -840,7 +687,7 @@ private fun BadgeItem(
                             .fillMaxWidth(0.8f)
                             .height(3.dp)
                             .clip(RoundedCornerShape(2.dp))
-                            .background(Color(0xFF2A2A2A))
+                            .background(NavyBlue)
                     ) {
                         Box(
                             modifier = Modifier
@@ -930,7 +777,7 @@ private fun BadgeDetailDialog(
                             .fillMaxWidth()
                             .height(8.dp)
                             .clip(RoundedCornerShape(4.dp))
-                            .background(Color(0xFF2A2A2A))
+                            .background(NavyBlue)
                     ) {
                         Box(
                             modifier = Modifier

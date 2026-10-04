@@ -151,11 +151,38 @@ val MIGRATION_5_6 = object : Migration(5, 6) {
     }
 }
 
+/**
+ * v6 → v7
+ *
+ * Adds `playCount` and `listenedMs` to `playback_history`.
+ *
+ * These make the listening statistics truthful. Because the table is keyed on `songId`, a replay
+ * overwrote the previous row, so "Songs Played" was really "distinct songs ever played" — playing
+ * one song fifty times reported 1. And with only the nominal `durationMs` available, a track skipped
+ * after ten seconds was counted as a full listen.
+ *
+ * Both are purely additive with backward-compatible defaults:
+ *
+ * - `playCount` defaults to 1, which is exactly right for every existing row — each one represents
+ *   the most recent play of that song, and each was played at least once.
+ * - `listenedMs` defaults to 0 and is never back-filled from `durationMs`. For existing rows the app
+ *   genuinely does not know how long the user listened, and inventing a full-duration value would
+ *   recreate the exact over-count this migration exists to remove. Statistics accumulate honestly
+ *   from here on, so totals start lower after upgrading rather than being wrong.
+ */
+val MIGRATION_6_7 = object : Migration(6, 7) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE `playback_history` ADD COLUMN `playCount` INTEGER NOT NULL DEFAULT 1")
+        db.execSQL("ALTER TABLE `playback_history` ADD COLUMN `listenedMs` INTEGER NOT NULL DEFAULT 0")
+    }
+}
+
 /** Every migration the database understands, in ascending order. */
 val CRANK_MIGRATIONS: Array<Migration> = arrayOf(
     MIGRATION_1_2,
     MIGRATION_2_3,
     MIGRATION_3_4,
     MIGRATION_4_5,
-    MIGRATION_5_6
+    MIGRATION_5_6,
+    MIGRATION_6_7
 )

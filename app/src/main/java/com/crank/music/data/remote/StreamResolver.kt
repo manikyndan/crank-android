@@ -4,7 +4,9 @@ import android.util.Log
 import com.crank.music.data.remote.innertube.ClientAttempt
 import com.crank.music.data.remote.innertube.StreamCascadeResolver
 import com.crank.music.data.remote.innertube.StreamUnavailableException
+import com.crank.music.data.remote.gaana.GaanaRemoteDataSource
 import com.crank.music.data.remote.potoken.PoTokenGenerator
+import com.crank.music.domain.model.ContentSource
 import java.io.IOException
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -47,6 +49,7 @@ class StreamResolver @Inject constructor(
     private val cascadeResolver: StreamCascadeResolver,
     private val poTokenGenerator: PoTokenGenerator,
     private val visitorDataProvider: VisitorDataProvider,
+    private val gaanaSource: GaanaRemoteDataSource,
 ) {
 
     /**
@@ -77,6 +80,7 @@ class StreamResolver @Inject constructor(
         videoId: String,
         songTitle: String = "",
         artistName: String = "",
+        maxBitrateKbps: Int? = null,
     ): StreamData {
         // A value that is already a URL needs no resolving. Persisted stream URLs are stored in
         // this column, so this branch is hit on every replay of a previously-resolved track.
@@ -94,7 +98,20 @@ class StreamResolver @Inject constructor(
             )
         }
 
-        return resolveWithRetry(videoId, songTitle, artistName)
+        // A Gaana id is not a YouTube video id, so it must never reach the cascade: asking YouTube
+        // about a `seokey` produces a misleading "no playable stream" that blames the track rather
+        // than the routing. Gaana mints and signs its own URL, so it resolves through its own path.
+        ContentSource.gaanaTrackSeokeyOrNull(videoId)?.let { seokey ->
+            return gaanaSource.resolveStream(seokey, maxBitrateKbps)
+                ?: throw StreamUnavailableException(
+                    videoId = videoId,
+                    attempts = emptyList(),
+                    hint = "Gaana has no playable stream for '$seokey'. Either the track is not " +
+                        "streamable, or the Gaana source is not configured.",
+                )
+        }
+
+        return resolveWithRetry(videoId, songTitle, artistName, maxBitrateKbps)
     }
 
     /**
@@ -116,6 +133,7 @@ class StreamResolver @Inject constructor(
         videoId: String,
         songTitle: String,
         artistName: String,
+        maxBitrateKbps: Int? = null,
     ): StreamData {
         val visitorData = runCatching { visitorDataProvider.visitorData() }.getOrNull()
         val dataSyncId = visitorDataProvider.dataSyncId()
@@ -130,6 +148,7 @@ class StreamResolver @Inject constructor(
                     visitorData = visitorData,
                     dataSyncId = dataSyncId,
                     isLoggedIn = isLoggedIn,
+                    maxBitrateKbps = maxBitrateKbps,
                 )
 
                 Log.d(
@@ -222,32 +241,74 @@ class StreamResolver @Inject constructor(
                 "Referer" to "https://www.youtube.com/",
             )
 
-        /** Hosts that serve YouTube's signed, expiring stream URLs. */
-        private val YOUTUBE_MEDIA_HOSTS =
+        /**
+         * Hosts that serve signed, expiring stream URLs.
+         *
+         * Two sources sign differently and both must be listed here, because [isRottingUrl] is the
+         * gate deciding whether [isExpired] is consulted **at all** — a host missing from this list
+         * is trusted unconditionally.
+         *
+         *  - YouTube's CDN signs with `?expire=<unixSeconds>`.
+         *  - Gaana's CDN is Akamai, signing with `?hdnts=st=..~exp=..~acl=..~hmac=..`; the token
+         *    lifetime was measured at exactly 14400s (4 hours).
+         *
+         * Gaana's host was absent, so a URL that stopped working four hours after it was minted was
+         * still classified as directly playable days later and handed straight to ExoPlayer.
+         */
+        private val SIGNING_MEDIA_HOSTS =
             listOf(
                 "googlevideo.com",
                 "youtube.com",
                 "ytimg.com",
+                "akamaized.net",
             )
+
+        /**
+         * `exp=<seconds>` inside an Akamai `hdnts` token.
+         *
+         * Anchored on `^` or `~` so the `st=` start value, or any other field whose name merely
+         * ends in `exp`, cannot be mistaken for the expiry — `sn-abc~explist=5` must not match.
+         */
+        private val AKAMAI_EXP = Regex("(?:^|~)exp=(\\d+)")
 
         /**
          * True when [url] carries its own expiry and that moment has passed.
          *
-         * YouTube hands out CDN URLs with an `expire=<unixSeconds>` parameter, and a URL past
-         * that instant is answered with HTTP 403 — permanently, no matter how many times it is
-         * retried. Detecting it up front turns an opaque player error into a re-resolve.
+         * A CDN hands out signed URLs with a deadline, and a URL past that instant is answered
+         * with HTTP 403 — permanently, no matter how many times it is retried. Detecting it up
+         * front turns an opaque player error into a re-resolve.
          *
-         * URLs with no `expire` (plain file URLs, stable sources) are treated as usable; there
-         * are no grounds to reject them here.
+         * URLs with no recognisable expiry (plain file URLs, stable sources) are treated as
+         * usable; there are no grounds to reject them here.
          */
         fun isExpired(url: String, nowSeconds: Long = System.currentTimeMillis() / 1000L): Boolean {
             if (!url.startsWith("http")) return false
 
-            val expiry = extractQueryParam(url, "expire")?.toLongOrNull() ?: return false
+            val expiry = expirySecondsOf(url) ?: return false
 
             // A little slack so a URL about to lapse mid-handshake is treated as already gone
             // rather than starting a request it will lose.
             return expiry <= nowSeconds + 30L
+        }
+
+        /**
+         * The instant [url] stops working, in unix seconds, or `null` when it carries no
+         * recognisable deadline.
+         *
+         * Two shapes are understood, because the two sources sign differently:
+         *
+         *  - YouTube — `?expire=1730000000`
+         *  - Akamai / Gaana — `?hdnts=st=1730000000~exp=1730014400~acl=..~hmac=..`
+         *
+         * Public so a source that mints its own URLs can report `StreamData.expiresInSeconds`
+         * without re-implementing the parsing — two parsers is how the YouTube-only assumption
+         * that caused the original expiry bug would creep back in.
+         */
+        fun expirySecondsOf(url: String): Long? {
+            extractQueryParam(url, "expire")?.toLongOrNull()?.let { return it }
+
+            val hdnts = extractQueryParam(url, "hdnts") ?: return null
+            return AKAMAI_EXP.find(hdnts)?.groupValues?.get(1)?.toLongOrNull()
         }
 
         /**
@@ -263,7 +324,7 @@ class StreamResolver @Inject constructor(
         fun isRottingUrl(url: String): Boolean {
             if (!url.startsWith("http")) return false
             val host = runCatching { java.net.URI(url).host }.getOrNull() ?: return false
-            return YOUTUBE_MEDIA_HOSTS.any { domain -> host == domain || host.endsWith(".$domain") }
+            return SIGNING_MEDIA_HOSTS.any { domain -> host == domain || host.endsWith(".$domain") }
         }
 
         /**

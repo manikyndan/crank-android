@@ -180,6 +180,52 @@ class CrankMigrationTest {
     }
 
     @Test
+    fun migrate6To7_addsPlayCountAndListenedMsWithoutLosingHistory() {
+        helper.createDatabase(testDb, 6).use { db ->
+            db.execSQL(
+                """
+                INSERT INTO `playback_history`
+                    (`songId`, `title`, `artistName`, `albumId`, `durationMs`,
+                     `artworkUrl`, `streamUrl`, `playedAt`)
+                VALUES
+                    ('song-h1', 'Midnight City', 'M83', 'album-1', 243000,
+                     'https://example.test/art.jpg', 'https://example.test/stream', 1700000000000)
+                """.trimIndent()
+            )
+        }
+
+        val db = helper.runMigrationsAndValidate(testDb, 7, true, MIGRATION_6_7)
+
+        // The existing history row survives, and the new columns take defaults that are *correct*
+        // rather than merely non-null: each pre-existing row represents at least one play.
+        db.query(
+            "SELECT `title`, `playCount`, `listenedMs` FROM `playback_history` " +
+                "WHERE `songId` = 'song-h1'"
+        ).use { cursor ->
+            assertTrue("history row survived migration", cursor.moveToFirst())
+            assertEquals("Midnight City", cursor.getString(0))
+            assertEquals(1, cursor.getInt(1))
+            // Deliberately 0, not back-filled from durationMs: the app does not know how long the
+            // user listened before this version, and inventing a full-duration value would restore
+            // the over-count the migration exists to remove.
+            assertEquals(0L, cursor.getLong(2))
+        }
+
+        // Both columns must be writable, which is what the statistics rely on.
+        db.execSQL(
+            "UPDATE `playback_history` SET `playCount` = `playCount` + 1, `listenedMs` = 45000 " +
+                "WHERE `songId` = 'song-h1'"
+        )
+        db.query(
+            "SELECT `playCount`, `listenedMs` FROM `playback_history` WHERE `songId` = 'song-h1'"
+        ).use { cursor ->
+            assertTrue(cursor.moveToFirst())
+            assertEquals(2, cursor.getInt(0))
+            assertEquals(45000L, cursor.getLong(1))
+        }
+    }
+
+    @Test
     fun openHelper_migratesSeededDatabaseEndToEnd() {
         // Exercise the real production path: an on-disk db at v1, opened through
         // Room with the same migration array the app ships.

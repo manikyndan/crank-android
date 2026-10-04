@@ -12,8 +12,8 @@ import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
-import com.crank.music.data.local.HistoryEntity
 import com.crank.music.data.local.QueueItemEntity
+import com.crank.music.data.local.SettingsStore
 import com.crank.music.data.local.SongDao
 import com.crank.music.data.local.toEntity
 import com.crank.music.data.remote.StreamResolver
@@ -32,10 +32,12 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import java.util.concurrent.atomic.AtomicLong
 import javax.inject.Inject
 
@@ -79,7 +81,9 @@ class PlayerViewModel @Inject constructor(
     private val musicRepository: MusicRepository,
     private val songDao: SongDao,
     private val downloadRepository: DownloadRepository,
+    private val audioEffects: com.crank.music.data.audio.AudioEffectsController,
     private val themePreference: com.crank.music.ui.theme.ThemePreference,
+    private val settingsStore: SettingsStore,
 ) : ViewModel() {
 
     /**
@@ -124,8 +128,19 @@ class PlayerViewModel @Inject constructor(
         _queue.value = updated.upNext
     }
 
-    private val _lyricsState = MutableStateFlow<LyricsState>(LyricsState.Loading)
-    val lyricsState: StateFlow<LyricsState> = _lyricsState.asStateFlow()
+    /**
+     * Lyrics for the current track, owned by [LyricsSession].
+     *
+     * The two network sources, the exact-before-fuzzy ordering and the stale-response guard all live
+     * there now; this is the flow the UI reads, unchanged.
+     */
+    private val lyricsSession = LyricsSession(
+        scope = viewModelScope,
+        musicRepository = musicRepository,
+        currentSongId = { _playerState.value.currentSong?.id },
+    )
+
+    val lyricsState: StateFlow<LyricsState> = lyricsSession.state
 
     private val _history = MutableStateFlow<List<Song>>(emptyList())
     val history: StateFlow<List<Song>> = _history.asStateFlow()
@@ -154,7 +169,28 @@ class PlayerViewModel @Inject constructor(
 
     private val playHistory = PlaybackHistory()
 
-    private var sleepTimerJob: Job? = null
+    /**
+     * Pauses playback when the user's chosen interval elapses.
+     *
+     * Extracted from this class; see [SleepTimerController]. Its state is mirrored into
+     * [_playerState] by a collector in `init`, so `PlayerState.sleepTimerMinutes` /
+     * `remainingSleepTimeMs` remain the single thing the UI reads — the screens did not change.
+     */
+    private val sleepTimer = SleepTimerController(viewModelScope)
+
+    /**
+     * Listening-history rows and the clock that measures how long each song was actually heard.
+     *
+     * Extracted from this class; see [HistoryRecorder] for the three invariants it keeps. The
+     * recorder owns the row writes, the privacy gate and the tick accumulator; this class only
+     * tells it when a play starts and when the player is ticking.
+     */
+    private val historyRecorder = HistoryRecorder(
+        songDao = songDao,
+        settingsStore = settingsStore,
+        scope = viewModelScope
+    )
+
     private var positionSaveJob: Job? = null
 
     private val playRequestCounter = AtomicLong(0)
@@ -223,9 +259,31 @@ class PlayerViewModel @Inject constructor(
      */
     private var consecutiveAutoSkips = 0
 
+    /**
+     * Wake counter for the progress tracker.
+     *
+     * Bumped by the player listener on any change that can move the progress bar or the play state.
+     * While playback is stopped the tracker waits on this instead of polling, so an idle app is not
+     * doing 2 Hz work in a coroutine that outlives every screen.
+     */
+    private val refreshSignal = MutableStateFlow(0L)
+
     private val playerListener = object : Player.Listener {
         override fun onIsPlayingChanged(isPlaying: Boolean) {
             _playerState.update { it.copy(isPlaying = isPlaying) }
+            // Wakes the progress tracker immediately out of its idle wait, so the bar starts moving
+            // on the tick the user presses play rather than up to a poll interval later.
+            wakeProgressTracker()
+        }
+
+        override fun onPositionDiscontinuity(
+            oldPosition: Player.PositionInfo,
+            newPosition: Player.PositionInfo,
+            reason: Int
+        ) {
+            // A seek, a repeat, or a skipped track while paused must still land in the UI, and the
+            // tracker is parked when nothing is playing.
+            wakeProgressTracker()
         }
 
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
@@ -237,7 +295,7 @@ class PlayerViewModel @Inject constructor(
                         duration = player.duration.coerceAtLeast(0L)
                     )
                 }
-                generateLyricsForSong(song)
+                lyricsSession.load(song)
             }
         }
 
@@ -331,9 +389,11 @@ class PlayerViewModel @Inject constructor(
             }
         }
 
-        override fun onRepeatModeChanged(repeatMode: Int) {
-            _playerState.update { it.copy(repeatMode = repeatMode) }
-        }
+        // Deliberately NOT mirrored from ExoPlayer. The player holds exactly one MediaItem, so its
+        // own repeatMode can only loop that single item forever — it can never advance the app's
+        // queue, and while it loops, STATE_ENDED never fires, so handleSongEnd() is never reached.
+        // Repeat is owned by `_playerState.repeatMode` (see toggleRepeatMode); mirroring ExoPlayer
+        // here would immediately overwrite the app's value with OFF.
 
         override fun onShuffleModeEnabledChanged(shuffleModeEnabled: Boolean) {
             _playerState.update { it.copy(shuffleModeEnabled = shuffleModeEnabled) }
@@ -350,10 +410,24 @@ class PlayerViewModel @Inject constructor(
         RemoteControlBridge.onSkipToPrevious = { playPrevious() }
         startProgressTracker()
         loadHistory()
+        restorePlaybackSpeed()
         startPositionSaving()
         observeCurrentSongDownload()
         observeCurrentSongDownloadProgress()
         observeCurrentSongLiked()
+        // Mirrors the extracted sleep timer into the state the UI already reads, so no screen had to
+        // learn about SleepTimerController. Started before restoreLastPlayback() so the first
+        // emissions are not lost.
+        viewModelScope.launch {
+            sleepTimer.state.collect { timer ->
+                _playerState.update {
+                    it.copy(
+                        sleepTimerMinutes = timer.totalMinutes,
+                        remainingSleepTimeMs = timer.remainingMs
+                    )
+                }
+            }
+        }
         // restoreLastPlayback() owns the queue when a saved session exists; it
         // delegates to loadQueueFromRoom() otherwise. Running them concurrently
         // would let the two sources race for _queue.value.
@@ -402,7 +476,9 @@ class PlayerViewModel @Inject constructor(
                     )
                 }
 
-                player.repeatMode = savedState.repeatMode
+                // ExoPlayer's own repeatMode is left OFF: the restored repeat mode is app state,
+                // and pushing REPEAT_MODE_ALL into a single-item player would loop that item and
+                // never emit STATE_ENDED, so the restored queue could never advance.
                 player.shuffleModeEnabled = savedState.shuffleEnabled
 
                 // Restore the actual media item so the user can hit play and
@@ -414,6 +490,12 @@ class PlayerViewModel @Inject constructor(
                     val mediaItem = MediaItem.Builder()
                         .setMediaId(savedSong.id)
                         .setUri(savedState.songStreamUrl)
+                        // Must match the key the download was written under
+                        // (DownloadRepositoryImpl.downloadSong). Without it, Media3 keys the cache
+                        // on the resolved URL string — which carries expiring signature
+                        // parameters, so it differs on every resolve — and a downloaded track
+                        // never hits its own cached bytes.
+                        .setCustomCacheKey(savedSong.id)
                         .setMediaMetadata(
                             MediaMetadata.Builder()
                                 .setTitle(savedSong.title)
@@ -524,25 +606,87 @@ class PlayerViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Publishes playback progress and measures listening time.
+     *
+     * The tick doubles as the listening clock: each tick while the player is actually playing adds
+     * one interval to the current song's accumulator. That is the only definition of "listened"
+     * that survives a skip, a pause or a seek — using the track's duration instead is what made the
+     * statistics overstate how much the user had heard.
+     *
+     * The accumulator is flushed to the database every [TICKS_PER_FLUSH] ticks rather than every
+     * tick, and immediately whenever playback pauses or the track changes, so at most one interval
+     * of listening time is lost when the app is killed.
+     */
     private fun startProgressTracker() {
         viewModelScope.launch {
+            var ticksSinceFlush = 0
+            var wasPlaying = false
             while (isActive) {
                 val dur = player.duration.coerceAtLeast(0L)
                 val pos = player.currentPosition.coerceAtLeast(0L)
+                val isPlayingNow = player.isPlaying
                 val sessionId = if (player.audioSessionId != 0 && player.audioSessionId != -1) player.audioSessionId else null
+
+                // Bind the process-scoped audio effects to the session as soon as one exists, so a
+                // saved equalizer preset applies to playback even if the user never opens the
+                // equalizer screen this session. No-op when the session is unchanged.
+                if (sessionId != null) audioEffects.attach(sessionId)
+
+                if (isPlayingNow) {
+                    historyRecorder.accumulateTick(PROGRESS_TICK_MS)
+                    ticksSinceFlush++
+                    if (ticksSinceFlush >= TICKS_PER_FLUSH) {
+                        ticksSinceFlush = 0
+                        historyRecorder.flushListeningTime()
+                    }
+                } else if (wasPlaying) {
+                    // Playback just paused or stopped: persist what has been accumulated so far.
+                    ticksSinceFlush = 0
+                    historyRecorder.flushListeningTime()
+                }
+                wasPlaying = isPlayingNow
+
                 _playerState.update {
                     it.copy(
-                        isPlaying = player.isPlaying,
+                        isPlaying = isPlayingNow,
                         progress = pos,
                         duration = if (dur > 0L) dur else it.duration,
                         audioSessionId = sessionId ?: it.audioSessionId,
-                        repeatMode = player.repeatMode,
+                        // repeatMode is intentionally not refreshed from the player: it is
+                        // app-owned state (the player is always REPEAT_MODE_OFF), so copying it
+                        // here would reset the user's choice every 500ms.
                         shuffleModeEnabled = player.shuffleModeEnabled
                     )
                 }
-                delay(500L)
+
+                if (isPlayingNow) {
+                    // A progress bar needs a cadence, so this is a poll — but only while audio is
+                    // actually moving.
+                    delay(PROGRESS_TICK_MS)
+                } else {
+                    // Nothing is playing, so nothing on screen is changing. This used to keep
+                    // ticking anyway, which meant a ViewModel-scoped 500 ms coroutine ran for the
+                    // entire life of the app — including while the user was on another screen with
+                    // playback stopped — waking the process twice a second to read three values that
+                    // could not have changed. Park here until the player reports a state change, with
+                    // a slow timeout as a safety net in case a listener callback is missed.
+                    val seen = refreshSignal.value
+                    withTimeoutOrNull(IDLE_REFRESH_MS) {
+                        refreshSignal.first { it != seen }
+                    }
+                }
             }
         }
+    }
+
+    /**
+     * Increments the tracker's wake counter, releasing it from its idle wait.
+     *
+     * Safe to call from a player listener, which ExoPlayer invokes on the application's main thread.
+     */
+    private fun wakeProgressTracker() {
+        refreshSignal.value += 1
     }
 
     private fun startPositionSaving() {
@@ -793,7 +937,7 @@ class PlayerViewModel @Inject constructor(
                         songStreamUrl = song.streamUrl,
                         positionMs = player.currentPosition.coerceAtLeast(0),
                         queueJson = encodeQueueIds(PlayQueue.persistableSongs(playQueue)),
-                        repeatMode = player.repeatMode,
+                        repeatMode = _playerState.value.repeatMode,
                         shuffleEnabled = player.shuffleModeEnabled
                     )
                 )
@@ -805,35 +949,22 @@ class PlayerViewModel @Inject constructor(
 
     private fun handleSongEnd() {
         val currentSong = _playerState.value.currentSong ?: return
-        recordHistory(currentSong)
 
-        when (player.repeatMode) {
+        // History is recorded once, when the track actually starts (see resolveAndPlay). Recording
+        // it again here only rewrote `playedAt` to the moment the song *finished*, which made
+        // "recently played" order by end time and double-wrote every track — it was invisible only
+        // because the history primary key is the song id.
+
+        // Reads the app's own repeat mode, not ExoPlayer's: `player.repeatMode` is always OFF by
+        // design (see toggleRepeatMode), so branching on it here would have made Repeat-One
+        // unreachable as well.
+        when (_playerState.value.repeatMode) {
             Player.REPEAT_MODE_ONE -> {
                 player.seekTo(0)
                 player.play()
             }
             else -> {
                 playNext()
-            }
-        }
-    }
-
-    private fun recordHistory(song: Song) {
-        viewModelScope.launch {
-            try {
-                val entity = HistoryEntity(
-                    songId = song.id,
-                    title = song.title,
-                    artistName = song.artistName,
-                    albumId = song.albumId,
-                    durationMs = song.durationMs,
-                    artworkUrl = song.artworkUrl,
-                    streamUrl = song.streamUrl,
-                    playedAt = System.currentTimeMillis()
-                )
-                songDao.insertHistoryItem(entity)
-            } catch (e: Exception) {
-                Log.e("CRANK_PLAYER", "Failed to record history: ${e.message}")
             }
         }
     }
@@ -875,6 +1006,26 @@ class PlayerViewModel @Inject constructor(
     }
 
     companion object {
+        /** Progress-publish interval, in milliseconds. Also the listening-clock resolution. */
+        private const val PROGRESS_TICK_MS = 500L
+
+        /**
+         * Longest the idle progress tracker will wait before checking again.
+         *
+         * Only a backstop: the listener wakes it as soon as anything actually happens. One second
+         * keeps a paused seek from showing a stale time for noticeably long without the 2 Hz poll the
+         * tracker used to run for the whole life of the process.
+         */
+        private const val IDLE_REFRESH_MS = 1_000L
+
+        /**
+         * Ticks between listening-time writes while playing.
+         *
+         * Thirty ticks is 15 seconds: frequent enough that a killed process loses at most one
+         * interval, rare enough that the statistics tables are not written every half-second.
+         */
+        private const val TICKS_PER_FLUSH = 30
+
         /**
          * How long after a tap a zero-byte download still earns the spinner.
          *
@@ -1038,6 +1189,10 @@ class PlayerViewModel @Inject constructor(
         val mediaItem = MediaItem.Builder()
             .setMediaId(song.id)
             .setUri(resolvedUrl)
+            // Keyed by song id, not by the resolved URL, so a downloaded track is served from the
+            // bytes Media3 already stored under that same key. See downloadSong() in
+            // DownloadRepositoryImpl for the other half of this contract.
+            .setCustomCacheKey(song.id)
             .setMediaMetadata(
                 MediaMetadata.Builder()
                     .setTitle(song.title)
@@ -1056,8 +1211,7 @@ class PlayerViewModel @Inject constructor(
 
         // The track is genuinely starting (token verified current above), so
         // this — not queue insertion, not track end — is the history moment.
-        // handleSongEnd keeps its own call; REPLACE semantics make it idempotent.
-        recordHistory(song)
+        historyRecorder.recordPlay(song)
 
         // Record which attempt is now on the player, so a later 403 can be attributed to it.
         lastErrorToken = token
@@ -1073,7 +1227,7 @@ class PlayerViewModel @Inject constructor(
                 errorMessage = null
             )
         }
-        generateLyricsForSong(song)
+        lyricsSession.load(song)
         saveCurrentPlaybackPosition()
     }
 
@@ -1167,13 +1321,21 @@ class PlayerViewModel @Inject constructor(
         playSong(song)
     }
 
+    /**
+     * Cycles Off -> All -> One.
+     *
+     * The mode is held in [_playerState] and never pushed into ExoPlayer. ExoPlayer has a single
+     * MediaItem queued at a time — the app's queue lives in [PlayQueue] and is advanced by
+     * [playNext] — so setting `player.repeatMode = REPEAT_MODE_ALL` did not repeat the queue. It
+     * repeated the current track, and because that never reaches STATE_ENDED, [handleSongEnd] was
+     * never called and the queue never advanced: Repeat-All looked like "play this song forever".
+     */
     fun toggleRepeatMode() {
-        val nextMode = when (player.repeatMode) {
+        val nextMode = when (_playerState.value.repeatMode) {
             Player.REPEAT_MODE_OFF -> Player.REPEAT_MODE_ALL
             Player.REPEAT_MODE_ALL -> Player.REPEAT_MODE_ONE
             else -> Player.REPEAT_MODE_OFF
         }
-        player.repeatMode = nextMode
         _playerState.update { it.copy(repeatMode = nextMode) }
         saveCurrentPlaybackPosition()
     }
@@ -1200,6 +1362,26 @@ class PlayerViewModel @Inject constructor(
         val currentPitch = _playerState.value.playbackPitch
         player.playbackParameters = PlaybackParameters(speed, currentPitch)
         _playerState.update { it.copy(playbackSpeed = speed) }
+        // Persisted so the Playback Settings screen means something across restarts; a setting that
+        // silently reverts to 1x on every launch is the same class of bug as a toggle that does
+        // nothing.
+        viewModelScope.launch {
+            runCatching { settingsStore.putFloat(SettingsStore.PLAYBACK_SPEED, speed) }
+        }
+    }
+
+    /**
+     * Restores the speed saved by [setPlaybackSpeed].
+     *
+     * Applied through [setPlaybackSpeed] rather than directly to the player so the state flow and the
+     * engine cannot disagree; the write-back is harmless because the value is unchanged.
+     */
+    private fun restorePlaybackSpeed() {
+        viewModelScope.launch {
+            val saved = runCatching { settingsStore.getFloat(SettingsStore.PLAYBACK_SPEED, 1.0f) }
+                .getOrDefault(1.0f)
+            if (saved != 1.0f) setPlaybackSpeed(saved)
+        }
     }
 
     fun setPlaybackPitch(pitch: Float) {
@@ -1209,31 +1391,13 @@ class PlayerViewModel @Inject constructor(
     }
 
     fun setSleepTimer(minutes: Int) {
-        sleepTimerJob?.cancel()
-        if (minutes <= 0) {
-            _playerState.update { it.copy(sleepTimerMinutes = 0, remainingSleepTimeMs = 0L) }
-            return
-        }
-
-        var remainingMs = minutes * 60 * 1000L
-        _playerState.update { it.copy(sleepTimerMinutes = minutes, remainingSleepTimeMs = remainingMs) }
-
-        sleepTimerJob = viewModelScope.launch {
-            while (remainingMs > 0) {
-                delay(1000L)
-                remainingMs -= 1000L
-                _playerState.update { it.copy(remainingSleepTimeMs = remainingMs.coerceAtLeast(0L)) }
-            }
-            if (player.isPlaying) {
-                player.pause()
-            }
-            _playerState.update { it.copy(sleepTimerMinutes = 0, remainingSleepTimeMs = 0L) }
+        sleepTimer.start(minutes) {
+            if (player.isPlaying) player.pause()
         }
     }
 
     fun cancelSleepTimer() {
-        sleepTimerJob?.cancel()
-        _playerState.update { it.copy(sleepTimerMinutes = 0, remainingSleepTimeMs = 0L) }
+        sleepTimer.cancel()
     }
 
     /**
@@ -1394,7 +1558,7 @@ class PlayerViewModel @Inject constructor(
             return
         }
 
-        if (player.repeatMode == Player.REPEAT_MODE_ALL) {
+        if (_playerState.value.repeatMode == Player.REPEAT_MODE_ALL) {
             val currentSong = _playerState.value.currentSong
             if (currentSong == null) {
                 Log.w("CRANK_PLAYER", "Repeat-all with no current song; stopping")
@@ -1453,162 +1617,17 @@ class PlayerViewModel @Inject constructor(
         }
     }
 
-    /**
-     * Loads lyrics for [song].
-     *
-     * ## Why the result is checked before it is published
-     *
-     * Lyrics arrive over the network, so this is slow enough to lose a race. Skipping a track
-     * while the previous one is still fetching used to let the older response land last and
-     * replace the new track's lyrics — the visible symptom being lyrics that belong to the
-     * *previous* song. The guard below makes a stale response a no-op.
-     *
-     * The check is on the song identity rather than on a token, because here the thing that must
-     * match is simply "is this still the song on screen".
-     */
-    private fun generateLyricsForSong(song: Song) {
-        _lyricsState.value = LyricsState.Loading
-        viewModelScope.launch {
-            try {
-                val result = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                    fetchLyricsFor(song)
-                }
-
-                // Discard anything that arrives after the user has moved on. Compared on id
-                // because the same track may be re-requested; a late response for the *same*
-                // song is still correct and harmless.
-                if (!lyricsAreForCurrentTrack(song.id, _playerState.value.currentSong?.id)) {
-                    Log.d(
-                        "CRANK_LYRICS",
-                        "Discarding lyrics for '${song.title}': no longer the current track",
-                    )
-                    return@launch
-                }
-
-                if (result != null) {
-                    // Which branch produced these lyrics decides whether the screen may highlight
-                    // a line as "now singing". Logged because the two render very differently and
-                    // the difference is otherwise invisible without a debugger.
-                    Log.d(
-                        "CRANK_LYRICS",
-                        "Lyrics for '${song.title}': timing=${result.timing}, " +
-                            "lines=${result.lines.size}",
-                    )
-                }
-                _lyricsState.value =
-                    if (result != null) {
-                        LyricsState.Success(result.lines, result.timing)
-                    } else {
-                        LyricsState.Unavailable
-                    }
-            } catch (e: Exception) {
-                Log.e("CRANK_PLAYER", "Lyrics fetch failed: ${e.message}")
-                if (_playerState.value.currentSong?.id == song.id) {
-                    _lyricsState.value = LyricsState.Unavailable
-                }
-            }
-        }
-    }
-
-    /**
-     * Fetches lyrics for [song], trying the exact-match source before the fuzzy one.
-     *
-     * ## Why the order matters
-     *
-     * YouTube Music is asked by *track id*, so whatever comes back is for the song that is
-     * actually playing — it cannot mismatch. LRCLIB is asked by *title and artist*, which covers
-     * tracks YouTube Music has no lyrics for, but searches are fuzzy and can match a different
-     * recording: a live version, a cover, or a same-titled song. That is how lyrics for the
-     * wrong track reach the screen. LRCLIB results are therefore scored on title, artist and
-     * duration and a non-matching title is rejected outright — see `LrclibLyricsSource`.
-     *
-     * So the exact source is tried first and the fuzzy one only as a fallback. The previous
-     * order was forced: the YouTube Music path was a stub returning `null`, so every track went
-     * to LRCLIB and the mismatch was guaranteed rather than occasional.
-     *
-     * Parsing is delegated to [LyricsParser], which handles the LRC shapes the previous inline
-     * regex silently dropped. See that class for the specific cases.
-     */
-    private suspend fun fetchLyricsFor(song: Song): ParsedLyrics? {
-        var fromExactSource: ParsedLyrics? = null
-
-        // Exact source: needs a video id. A recognised-only track (and any track whose id is not
-        // a YouTube id) has none, and asking would produce a browse id that resolves to nothing.
-        if (song.id.isNotBlank() && song.isPlayable && !song.id.startsWith("http")) {
-            val raw =
-                try {
-                    musicRepository.getLyricsByVideoId(song.id)
-                } catch (e: Exception) {
-                    Log.d("CRANK_LYRICS", "YouTube Music lyrics unavailable for '${song.title}'")
-                    null
-                }
-
-            if (!raw.isNullOrBlank()) {
-                // YouTube Music returns timestamped LRC when it has it, and plain text otherwise.
-                // The parser handles both, so there is no separate plain-text branch here — that
-                // duplication was how the two paths could disagree about timing.
-                val parsed = LyricsParser.parse(raw, song.durationMs)
-                if (!parsed.isEmpty) {
-                    // Real timings beat estimated ones, so a timed result wins outright.
-                    if (parsed.timing == LyricsTiming.SYNCED) return parsed
-
-                    // Plain text, though, is not the end of the search. Returning here on it is
-                    // what left the karaoke view unreachable for most tracks: YouTube Music very
-                    // often has the words without the timings, while LRCLIB frequently has the
-                    // same words WITH them. Hold this as a fallback and ask the other source.
-                    fromExactSource = parsed
-                }
-            }
-        }
-
-        val fromFuzzy = fetchLyricsFromLRCLIB(song.title, song.artistName, song.durationMs)
-        return when {
-            fromFuzzy == null -> fromExactSource
-            // A timed match from the fuzzy source is still better than untimed text from the
-            // exact one — the whole point of the karaoke view is that it knows when each line is.
-            fromFuzzy.timing == LyricsTiming.SYNCED -> fromFuzzy
-            // Both untimed: prefer the exact source, whose title/artist match is not a guess.
-            fromExactSource != null -> fromExactSource
-            else -> fromFuzzy
-        }
-    }
-
-    private suspend fun fetchLyricsFromLRCLIB(
-        title: String,
-        artist: String,
-        durationMs: Long,
-    ): ParsedLyrics? {
-        return try {
-            // durationMs was already threaded here but unused; passing it is what lets the match
-            // reject a remix whose lyrics are paced differently from the track playing.
-            val httpResponse = musicRepository.searchLyrics(title, artist, durationMs) ?: return null
-
-            // Synced lyrics first: real timings beat estimated ones.
-            val synced = httpResponse.syncedLyrics
-            if (!synced.isNullOrBlank()) {
-                val parsed = LyricsParser.parse(synced, durationMs)
-                if (!parsed.isEmpty) return parsed
-            }
-
-            val plain = httpResponse.plainLyrics
-            if (!plain.isNullOrBlank()) {
-                val parsed = LyricsParser.parse(plain, durationMs)
-                if (!parsed.isEmpty) return parsed
-            }
-
-            null
-        } catch (e: Exception) {
-            Log.e("CRANK_LYRICS", "LRCLIB failed for '$title': ${e.message}")
-            null
-        }
-    }
-
     override fun onCleared() {
         super.onCleared()
         saveCurrentPlaybackPosition()
         player.removeListener(playerListener)
-        sleepTimerJob?.cancel()
+        sleepTimer.cancel()
         positionSaveJob?.cancel()
+
+        // Persist whatever the listening clock has accumulated but not yet flushed. This cannot use
+        // viewModelScope — it is already cancelled by the time onCleared runs — so the recorder puts
+        // it on an application-lifetime scope, which is the only context that outlives this ViewModel.
+        historyRecorder.flushListeningTimeOnProcessScope()
 
         // Detach from the OS-transport bridge. This ViewModel is activity-scoped, so onCleared
         // runs as the app's last activity finishes — but the bridge is a process-wide singleton
@@ -1631,20 +1650,9 @@ class PlayerViewModel @Inject constructor(
             isLocal = false
         )
     }
-}
 
-/**
- * True when lyrics fetched for [requestedSongId] still correspond to the track now playing.
- *
- * Lyrics are loaded asynchronously. If the user skips before they arrive, the response is for a
- * track that is no longer current, and rendering it would put the wrong song's words under the
- * right title — the exact mismatch the "every surface refers to the same track" requirement
- * forbids. This single check is what keeps lyrics aligned with the playing track. It is a
- * top-level function (not a method) so it can be unit-tested without an Android runtime.
- *
- * Compared on id rather than object identity: the same track is often requested more than once
- * (e.g. replay), and a late response for the *same* song is still correct and must not be
- * discarded.
- */
-internal fun lyricsAreForCurrentTrack(requestedSongId: String, currentSongId: String?): Boolean =
-    currentSongId == requestedSongId
+    // LyricsSession, the exact-before-fuzzy ordering, the stale-response guard and the top-level
+    // `lyricsAreForCurrentTrack` comparison all moved to LyricsSession.kt, along with the sleep timer
+    // (now SleepTimerController.kt). Both keep their test coverage: the lyrics track-correspondence
+    // test resolves the same package-private function from its new home.
+}

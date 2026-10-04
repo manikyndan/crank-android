@@ -84,3 +84,29 @@ val WaveformInactive: Color @Composable @ReadOnlyComposable get() = pal.navyBlue
 val ErrorRed: Color @Composable @ReadOnlyComposable get() = pal.error
 val SuccessGreen: Color @Composable @ReadOnlyComposable get() = pal.success
 val HeartRed: Color @Composable @ReadOnlyComposable get() = pal.heart
+
+/**
+ * Danger-card tokens, added because the destructive rows in Privacy & Security were painted with raw
+ * literals (`Color(0xFF2A1010)` for the panel, `Color(0xFFFF5252)` for the label, `Color(0xFFFF8A80)`
+ * for the secondary line).
+ *
+ * Those are *dark-mode* values. With the Light theme selected the "Delete listening history" card was a
+ * near-black rectangle with light-red text sitting on a white page — the screen where a user is asked to
+ * confirm an irreversible action was the least legible one in the app. A raw literal cannot follow the
+ * theme, which is exactly why these three names exist.
+ *
+ * [ErrorCardSurface] is the tinted panel, [ErrorBorderSubtle] its outline and [ErrorMuted] the softer
+ * red that stays readable on that panel in both themes.
+ */
+val ErrorCardSurface: Color @Composable @ReadOnlyComposable get() = pal.errorSurface
+val ErrorBorderSubtle: Color @Composable @ReadOnlyComposable get() = pal.errorBorder
+val ErrorMuted: Color @Composable @ReadOnlyComposable get() = pal.errorMuted
+
+/**
+ * Caution colour, for "this costs data" / "this download is paused" / an elevated equalizer band.
+ *
+ * The screens previously reached for amber literals (`0xFFFF9800`, `0xFFFFC107`) that were tuned
+ * against a black background; the light-theme equivalent has to be considerably darker to stay legible
+ * on white, which is why this is a token and not a constant.
+ */
+val WarningAmber: Color @Composable @ReadOnlyComposable get() = pal.warning

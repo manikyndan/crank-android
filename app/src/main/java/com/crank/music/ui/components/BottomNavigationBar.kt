@@ -1,6 +1,7 @@
 package com.crank.music.ui.components
 
 import android.view.HapticFeedbackConstants
+import androidx.annotation.StringRes
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
@@ -60,27 +61,31 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
+import com.crank.music.R
+import com.crank.music.ui.CrankTestTags
 
 sealed class NavItem(
     val route: String,
-    val title: String,
+    @StringRes val titleRes: Int,
     val selectedIcon: ImageVector,
     val unselectedIcon: ImageVector
 ) {
-    object Home : NavItem("home", "Home", Icons.Filled.Home, Icons.Outlined.Home)
+    object Home : NavItem("home", R.string.nav_home, Icons.Filled.Home, Icons.Outlined.Home)
 
     /**
      * Browse. Same route and destination as the previous `Explore` item — only the label and the
      * icon changed, so nothing that navigates by route had to move.
      */
-    object Browse : NavItem("explore", "Browse", Icons.Filled.Explore, Icons.Outlined.Explore)
+    object Browse : NavItem("explore", R.string.nav_browse, Icons.Filled.Explore, Icons.Outlined.Explore)
 
-    object Library : NavItem("library", "Library", Icons.Filled.LibraryMusic, Icons.Outlined.LibraryMusic)
+    object Library : NavItem("library", R.string.nav_library, Icons.Filled.LibraryMusic, Icons.Outlined.LibraryMusic)
 
     /**
      * Search is now a top-level destination.
@@ -88,7 +93,7 @@ sealed class NavItem(
      * It was previously reachable only through `composable("search")`, while `MainScreen` carried
      * a comment noting there was no Search tab and that Explore was standing in for it.
      */
-    object Search : NavItem("search", "Search", Icons.Filled.Search, Icons.Outlined.Search)
+    object Search : NavItem("search", R.string.nav_search, Icons.Filled.Search, Icons.Outlined.Search)
 
     /**
      * Removed: `Create` ("Crank AI") and `You`.
@@ -139,7 +144,8 @@ fun BottomNavigationBar(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(58.dp),
+                    .height(58.dp)
+                    .testTag(CrankTestTags.Navigation.BAR),
                 horizontalArrangement = Arrangement.SpaceEvenly,
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -151,7 +157,9 @@ fun BottomNavigationBar(
                             view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
                             onNavigate(item.route)
                         },
-                        modifier = Modifier.weight(1f)
+                        modifier = Modifier
+                            .weight(1f)
+                            .testTag(CrankTestTags.Navigation.tab(item.route))
                     )
                 }
             }
@@ -188,6 +196,9 @@ private fun NavTabItem(
         label = "tab_tint"
     )
 
+    // Resolved once rather than per use, so the label and its content description cannot drift.
+    val label = stringResource(item.titleRes)
+
     Column(
         modifier = modifier
             .fillMaxHeight()
@@ -200,7 +211,7 @@ private fun NavTabItem(
     ) {
         Icon(
             imageVector = if (isSelected) item.selectedIcon else item.unselectedIcon,
-            contentDescription = item.title,
+            contentDescription = label,
             tint = tint,
             modifier = Modifier
                 .size(24.dp)
@@ -213,7 +224,7 @@ private fun NavTabItem(
         Spacer(modifier = Modifier.height(3.dp))
 
         Text(
-            text = item.title,
+            text = label,
             color = tint,
             fontSize = 11.sp,
             fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
@@ -226,8 +237,10 @@ private fun NavTabItem(
 @Composable
 fun MiniPlayer(
     modifier: Modifier = Modifier,
-    title: String = "No Song Playing",
-    artist: String = "Unknown Artist",
+    // Null rather than a literal default: a default parameter is evaluated before the composable
+    // body, where `stringResource` is not available.
+    title: String? = null,
+    artist: String? = null,
     artworkUrl: String = "",
     progress: Float = 0f,
     isPlaying: Boolean = false,
@@ -245,11 +258,15 @@ fun MiniPlayer(
 ) {
     var dragOffset by remember { mutableStateOf(0f) }
 
+    val resolvedTitle = title ?: stringResource(R.string.mini_player_no_song)
+    val resolvedArtist = artist ?: stringResource(R.string.mini_player_unknown_artist)
+
     // Elevated frosted bar with rounded top corners, floating just above the
     // navigation bar. Signature unchanged, so MainScreen needs no edits.
     Surface(
         modifier = modifier
             .fillMaxWidth()
+            .testTag(CrankTestTags.Player.MINI_PLAYER)
             .graphicsLayer {
                 translationY = dragOffset
             }
@@ -317,7 +334,7 @@ fun MiniPlayer(
                             if (artworkUrl.isNotBlank()) {
                                 AsyncImage(
                                     model = artworkUrl,
-                                    contentDescription = "Album Art",
+                                    contentDescription = stringResource(R.string.mini_player_album_art),
                                     contentScale = ContentScale.Crop,
                                     modifier = Modifier.fillMaxSize()
                                 )
@@ -342,7 +359,7 @@ fun MiniPlayer(
                         modifier = Modifier.weight(1f)
                     ) {
                         Text(
-                            text = title,
+                            text = resolvedTitle,
                             style = MaterialTheme.typography.titleSmall,
                             color = MaterialTheme.colorScheme.onSurface,
                             maxLines = 1,
@@ -350,10 +367,11 @@ fun MiniPlayer(
                             fontSize = 14.sp,
                             fontWeight = FontWeight.Bold
                         )
+                        val loadingLabel = stringResource(R.string.mini_player_loading)
                         val subtitle = when {
-                            isLoading -> "Loading…"
+                            isLoading -> loadingLabel
                             errorMessage != null -> errorMessage
-                            else -> artist
+                            else -> resolvedArtist
                         }
                         Text(
                             text = subtitle,
@@ -386,9 +404,9 @@ fun MiniPlayer(
                                     Icons.Default.FavoriteBorder
                                 },
                                 contentDescription = if (isLiked) {
-                                    "Remove from Liked Songs"
+                                    stringResource(R.string.action_unlike)
                                 } else {
-                                    "Add to Liked Songs"
+                                    stringResource(R.string.action_like)
                                 },
                                 // Filled heart takes the accent; the outline stays muted, so the
                                 // state reads at a glance without a label.
@@ -407,7 +425,7 @@ fun MiniPlayer(
                         ) {
                             Icon(
                                 imageVector = Icons.AutoMirrored.Filled.PlaylistAdd,
-                                contentDescription = "Add to playlist",
+                                contentDescription = stringResource(R.string.action_add_to_playlist),
                                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.size(24.dp)
                             )
@@ -419,7 +437,11 @@ fun MiniPlayer(
                         ) {
                             Icon(
                                 imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                                contentDescription = if (isPlaying) "Pause" else "Play",
+                                contentDescription = if (isPlaying) {
+                                    stringResource(R.string.action_pause)
+                                } else {
+                                    stringResource(R.string.action_play)
+                                },
                                 tint = MaterialTheme.colorScheme.onSurface,
                                 modifier = Modifier.size(30.dp)
                             )

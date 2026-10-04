@@ -39,7 +39,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -181,8 +181,8 @@ fun LyricsScreen(
     playerViewModel: PlayerViewModel,
     onBackClick: () -> Unit = {}
 ) {
-    val playerState by playerViewModel.playerState.collectAsState()
-    val lyricsState by playerViewModel.lyricsState.collectAsState()
+    val playerState by playerViewModel.playerState.collectAsStateWithLifecycle()
+    val lyricsState by playerViewModel.lyricsState.collectAsStateWithLifecycle()
     val song = playerState.currentSong
     val view = LocalView.current
 

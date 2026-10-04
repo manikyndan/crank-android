@@ -31,7 +31,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -79,7 +79,7 @@ fun ExploreScreen(
     /** Opens the album destination for a new-release card. */
     onAlbumClick: (Album) -> Unit = {}
 ) {
-    val uiState by exploreViewModel.uiState.collectAsState()
+    val uiState by exploreViewModel.uiState.collectAsStateWithLifecycle()
     val view = LocalView.current
 
     // Re-checked every time the tab is opened: content older than a day is refetched, so Browse

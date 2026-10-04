@@ -69,7 +69,7 @@ import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -90,6 +90,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -106,6 +107,7 @@ import coil3.request.ImageRequest
 import coil3.request.SuccessResult
 import coil3.request.allowHardware
 import com.crank.music.domain.model.DownloadState
+import com.crank.music.ui.CrankTestTags
 import com.crank.music.ui.components.DownloadControlVisuals
 import com.crank.music.ui.components.DownloadProgressIcon
 import com.crank.music.ui.components.PlaybackControlsSheet
@@ -146,9 +148,9 @@ fun NowPlayingScreen(
     onArtistClick: (String) -> Unit = {},
     libraryViewModel: com.crank.music.ui.viewmodel.LibraryViewModel = androidx.hilt.navigation.compose.hiltViewModel(),
 ) {
-    val playerState by playerViewModel.playerState.collectAsState()
+    val playerState by playerViewModel.playerState.collectAsStateWithLifecycle()
     val song = playerState.currentSong
-    val downloadState by playerViewModel.currentSongDownloadState.collectAsState()
+    val downloadState by playerViewModel.currentSongDownloadState.collectAsStateWithLifecycle()
     val artworkUrl = song?.artworkUrl.orEmpty()
 
     var showSleepTimerSheet by remember { mutableStateOf(false) }
@@ -157,14 +159,14 @@ fun NowPlayingScreen(
 
     // Dark Mode row state. Read from the same ThemePreference the theme root uses, so the icon can
     // never disagree with the theme actually in effect.
-    val themeMode by playerViewModel.themeMode.collectAsState()
+    val themeMode by playerViewModel.themeMode.collectAsStateWithLifecycle()
     val systemInDarkTheme = androidx.compose.foundation.isSystemInDarkTheme()
     val isDarkNow = !(themeMode ?: ThemeMode.DARK).isLight(systemInDarkTheme)
     var showPlaylistSheet by remember { mutableStateOf(false) }
     var showCastHint by remember { mutableStateOf(false) }
     var isScrubbing by remember { mutableStateOf(false) }
 
-    val isLiked by playerViewModel.isCurrentLiked.collectAsState()
+    val isLiked by playerViewModel.isCurrentLiked.collectAsStateWithLifecycle()
 
     val view = LocalView.current
     val context = LocalContext.current
@@ -525,7 +527,7 @@ fun NowPlayingScreen(
             ) {
                 IconButton(
                     onClick = { playerViewModel.playPrevious() },
-                    modifier = Modifier.size(56.dp)
+                    modifier = Modifier.size(56.dp).testTag(CrankTestTags.Player.PREVIOUS)
                 ) {
                     Icon(
                         imageVector = Icons.Default.SkipPrevious,
@@ -536,11 +538,12 @@ fun NowPlayingScreen(
                 }
                 ApplePlayPauseButton(
                     isPlaying = playerState.isPlaying,
-                    onClick = { playerViewModel.togglePlayPause() }
+                    onClick = { playerViewModel.togglePlayPause() },
+                    modifier = Modifier.testTag(CrankTestTags.Player.PLAY_PAUSE)
                 )
                 IconButton(
                     onClick = { playerViewModel.playNext() },
-                    modifier = Modifier.size(56.dp)
+                    modifier = Modifier.size(56.dp).testTag(CrankTestTags.Player.NEXT)
                 ) {
                     Icon(
                         imageVector = Icons.Default.SkipNext,
@@ -562,7 +565,7 @@ fun NowPlayingScreen(
                         playerViewModel.toggleShuffle()
                         view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
                     },
-                    modifier = Modifier.size(44.dp)
+                    modifier = Modifier.size(44.dp).testTag(CrankTestTags.Player.SHUFFLE)
                 ) {
                     Icon(
                         imageVector = Icons.Default.Shuffle,
@@ -608,7 +611,7 @@ fun NowPlayingScreen(
                         playerViewModel.toggleRepeatMode()
                         view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
                     },
-                    modifier = Modifier.size(44.dp)
+                    modifier = Modifier.size(44.dp).testTag(CrankTestTags.Player.REPEAT)
                 ) {
                     Icon(
                         imageVector = if (playerState.repeatMode == Player.REPEAT_MODE_ONE)
@@ -796,7 +799,7 @@ internal fun AddToPlaylistSheet(
     onAdd: (String) -> Unit,
     onDismiss: () -> Unit
 ) {
-    val libraryState by libraryViewModel.uiState.collectAsState()
+    val libraryState by libraryViewModel.uiState.collectAsStateWithLifecycle()
     var newName by remember { mutableStateOf("") }
 
     ModalBottomSheet(
@@ -904,7 +907,7 @@ private fun DownloadControlButton(
     enabled: Boolean,
     onDownload: () -> Unit,
 ) {
-    val fraction by progressFlow.collectAsState()
+    val fraction by progressFlow.collectAsStateWithLifecycle()
     val animated = animatedDownloadFraction(fraction)
 
     Box(
@@ -1016,7 +1019,7 @@ private fun DownloadMenuRow(
     enabled: Boolean,
     onClick: () -> Unit,
 ) {
-    val fraction by progressFlow.collectAsState()
+    val fraction by progressFlow.collectAsStateWithLifecycle()
     val downloading = state == DownloadState.DOWNLOADING
     // Interpolated once, then shared by the ring and the number, so the two cannot disagree.
     val animated = animatedDownloadFraction(fraction)

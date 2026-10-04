@@ -28,7 +28,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -49,8 +49,8 @@ fun QueueScreen(
     onSongSelect: (Song) -> Unit = {},
     onBackClick: () -> Unit = {}
 ) {
-    val playerState by playerViewModel.playerState.collectAsState()
-    val queue by playerViewModel.queue.collectAsState()
+    val playerState by playerViewModel.playerState.collectAsStateWithLifecycle()
+    val queue by playerViewModel.queue.collectAsStateWithLifecycle()
     val currentSong = playerState.currentSong
 
     Column(

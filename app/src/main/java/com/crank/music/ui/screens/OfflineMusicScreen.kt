@@ -85,7 +85,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -112,18 +112,20 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.crank.music.ui.components.SectionHeader
 import com.crank.music.ui.theme.ChampagneGold
 import com.crank.music.ui.theme.CharcoalElevated
 import com.crank.music.ui.theme.CharcoalSurface
 import com.crank.music.ui.theme.GoldDark
 import com.crank.music.ui.theme.ObsidianBlack
+import com.crank.music.ui.theme.ErrorRed
+import com.crank.music.ui.theme.SuccessGreen
+import com.crank.music.ui.theme.WarningAmber
 import com.crank.music.ui.theme.TextSecondary
 import com.crank.music.ui.theme.TextTertiary
 import com.crank.music.ui.theme.WarmWhite
-import com.crank.music.ui.viewmodel.DownloadQuality
 import com.crank.music.ui.viewmodel.DownloadStatus
 import com.crank.music.ui.viewmodel.OfflineMusicViewModel
-import com.crank.music.ui.viewmodel.StorageLimit
 import kotlin.math.roundToInt
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -132,7 +134,7 @@ fun OfflineMusicScreen(
     viewModel: OfflineMusicViewModel = hiltViewModel(),
     onBackClick: () -> Unit = {}
 ) {
-    val uiState by viewModel.uiState.collectAsState()
+    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val view = LocalView.current
 
     Column(
@@ -188,40 +190,6 @@ fun OfflineMusicScreen(
                 )
             }
 
-            item {
-                AutoDownloadRulesSection(
-                    autoDownloadOnWifi = uiState.autoDownloadOnWifi,
-                    autoDownloadLiked = uiState.autoDownloadLiked,
-                    autoDownloadArtistReleases = uiState.autoDownloadArtistReleases,
-                    autoDownloadDailyMix = uiState.autoDownloadDailyMix,
-                    downloadQuality = uiState.downloadQuality,
-                    storageLimit = uiState.storageLimit,
-                    onToggleWifi = {
-                        viewModel.toggleAutoDownloadOnWifi(it)
-                        view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
-                    },
-                    onToggleLiked = {
-                        viewModel.toggleAutoDownloadLiked(it)
-                        view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
-                    },
-                    onToggleArtistReleases = {
-                        viewModel.toggleAutoDownloadArtistReleases(it)
-                        view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
-                    },
-                    onToggleDailyMix = {
-                        viewModel.toggleAutoDownloadDailyMix(it)
-                        view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
-                    },
-                    onQualitySelect = {
-                        viewModel.setDownloadQuality(it)
-                        view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
-                    },
-                    onStorageLimitChange = {
-                        viewModel.setStorageLimit(it)
-                        view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
-                    }
-                )
-            }
 
             item {
                 DownloadManagerSection(
@@ -519,7 +487,7 @@ private fun SwipeableOfflineItem(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(64.dp),
-                color = Color(0xFFFF5252).copy(alpha = 0.15f),
+                color = ErrorRed.copy(alpha = 0.15f),
                 shape = RoundedCornerShape(10.dp)
             ) {
                 Row(
@@ -533,7 +501,7 @@ private fun SwipeableOfflineItem(
                         Icon(
                             imageVector = Icons.Default.Delete,
                             contentDescription = "Delete",
-                            tint = Color(0xFFFF5252),
+                            tint = ErrorRed,
                             modifier = Modifier.size(22.dp)
                         )
                     }
@@ -643,277 +611,6 @@ private fun SwipeableOfflineItem(
 }
 
 @Composable
-private fun AutoDownloadRulesSection(
-    autoDownloadOnWifi: Boolean,
-    autoDownloadLiked: Boolean,
-    autoDownloadArtistReleases: Boolean,
-    autoDownloadDailyMix: Boolean,
-    downloadQuality: DownloadQuality,
-    storageLimit: StorageLimit,
-    onToggleWifi: (Boolean) -> Unit,
-    onToggleLiked: (Boolean) -> Unit,
-    onToggleArtistReleases: (Boolean) -> Unit,
-    onToggleDailyMix: (Boolean) -> Unit,
-    onQualitySelect: (DownloadQuality) -> Unit,
-    onStorageLimitChange: (StorageLimit) -> Unit
-) {
-    Column(modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp)) {
-        SectionHeader(icon = Icons.Default.CloudDownload, title = "Auto-Download Rules")
-        Spacer(modifier = Modifier.height(10.dp))
-
-        Surface(
-            modifier = Modifier.fillMaxWidth(),
-            color = CharcoalSurface,
-            shape = RoundedCornerShape(14.dp)
-        ) {
-            Column {
-                AutoDownloadToggle(
-                    icon = Icons.Default.Wifi,
-                    title = "Auto-download on Wi-Fi",
-                    subtitle = "Download over Wi-Fi only",
-                    isEnabled = autoDownloadOnWifi,
-                    onToggle = onToggleWifi
-                )
-                AutoDownloadRuleRow(
-                    icon = Icons.Default.Favorite,
-                    title = "When I add song to Liked Songs",
-                    subtitle = "→ Auto-download",
-                    isEnabled = autoDownloadLiked,
-                    onToggle = onToggleLiked
-                )
-                AutoDownloadRuleRow(
-                    icon = Icons.Default.Person,
-                    title = "When I follow artist",
-                    subtitle = "→ Download new releases",
-                    isEnabled = autoDownloadArtistReleases,
-                    onToggle = onToggleArtistReleases
-                )
-                AutoDownloadRuleRow(
-                    icon = Icons.Default.MusicNote,
-                    title = "Download my Daily Mix every night",
-                    subtitle = "Overnight when charging",
-                    isEnabled = autoDownloadDailyMix,
-                    onToggle = onToggleDailyMix,
-                    showDivider = false
-                )
-            }
-        }
-
-        Spacer(modifier = Modifier.height(12.dp))
-
-        Surface(
-            modifier = Modifier.fillMaxWidth(),
-            color = CharcoalSurface,
-            shape = RoundedCornerShape(14.dp)
-        ) {
-            Column(modifier = Modifier.padding(16.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        imageVector = Icons.Default.Speed,
-                        contentDescription = null,
-                        tint = ChampagneGold,
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = "Download Quality",
-                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                        color = WarmWhite
-                    )
-                }
-                Spacer(modifier = Modifier.height(12.dp))
-
-                LazyRow(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    contentPadding = PaddingValues(horizontal = 4.dp)
-                ) {
-                    items(DownloadQuality.entries.toList()) { quality ->
-                        val isSelected = quality == downloadQuality
-                        val borderColor by animateColorAsState(
-                            targetValue = if (isSelected) ChampagneGold else Color.Transparent,
-                            animationSpec = tween(200),
-                            label = "border"
-                        )
-
-                        Surface(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(10.dp))
-                                .border(1.dp, borderColor, RoundedCornerShape(10.dp))
-                                .clickable { onQualitySelect(quality) },
-                            color = if (isSelected) ChampagneGold.copy(alpha = 0.15f) else CharcoalElevated,
-                            shape = RoundedCornerShape(10.dp)
-                        ) {
-                            Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
-                                Text(
-                                    text = quality.label.split(" (")[0],
-                                    style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
-                                    color = if (isSelected) ChampagneGold else TextSecondary
-                                )
-                                Text(
-                                    text = quality.label.substringAfter("(").removeSuffix(")"),
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = TextTertiary
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        Spacer(modifier = Modifier.height(12.dp))
-
-        Surface(
-            modifier = Modifier.fillMaxWidth(),
-            color = CharcoalSurface,
-            shape = RoundedCornerShape(14.dp)
-        ) {
-            Column(modifier = Modifier.padding(16.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        imageVector = Icons.Default.Storage,
-                        contentDescription = null,
-                        tint = ChampagneGold,
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = "Storage Limit",
-                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                        color = WarmWhite
-                    )
-                    Spacer(modifier = Modifier.weight(1f))
-                    Text(
-                        text = storageLimit.label,
-                        style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
-                        color = ChampagneGold
-                    )
-                }
-                Spacer(modifier = Modifier.height(12.dp))
-
-                LazyRow(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    contentPadding = PaddingValues(horizontal = 4.dp)
-                ) {
-                    items(StorageLimit.entries.toList()) { limit ->
-                        val isSelected = limit == storageLimit
-                        Surface(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(10.dp))
-                                .clickable { onStorageLimitChange(limit) },
-                            color = if (isSelected) ChampagneGold else CharcoalElevated,
-                            shape = RoundedCornerShape(10.dp)
-                        ) {
-                            Text(
-                                text = limit.label,
-                                style = MaterialTheme.typography.labelLarge.copy(
-                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
-                                ),
-                                color = if (isSelected) ObsidianBlack else TextSecondary,
-                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp)
-                            )
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun AutoDownloadToggle(
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    title: String,
-    subtitle: String,
-    isEnabled: Boolean,
-    onToggle: (Boolean) -> Unit
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = null,
-            tint = if (isEnabled) ChampagneGold else TextSecondary,
-            modifier = Modifier.size(20.dp)
-        )
-        Spacer(modifier = Modifier.width(12.dp))
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = title,
-                style = MaterialTheme.typography.titleMedium,
-                color = WarmWhite
-            )
-            Text(
-                text = subtitle,
-                style = MaterialTheme.typography.labelSmall,
-                color = TextTertiary
-            )
-        }
-        Switch(
-            checked = isEnabled,
-            onCheckedChange = onToggle,
-            colors = SwitchDefaults.colors(
-                checkedThumbColor = ObsidianBlack,
-                checkedTrackColor = ChampagneGold,
-                uncheckedThumbColor = TextSecondary,
-                uncheckedTrackColor = CharcoalElevated
-            )
-        )
-    }
-}
-
-@Composable
-private fun AutoDownloadRuleRow(
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    title: String,
-    subtitle: String,
-    isEnabled: Boolean,
-    onToggle: (Boolean) -> Unit,
-    showDivider: Boolean = true
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = null,
-            tint = if (isEnabled) ChampagneGold else TextSecondary,
-            modifier = Modifier.size(20.dp)
-        )
-        Spacer(modifier = Modifier.width(12.dp))
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = title,
-                style = MaterialTheme.typography.bodyMedium,
-                color = WarmWhite
-            )
-            Text(
-                text = subtitle,
-                style = MaterialTheme.typography.labelSmall,
-                color = if (isEnabled) ChampagneGold else TextTertiary
-            )
-        }
-        Switch(
-            checked = isEnabled,
-            onCheckedChange = onToggle,
-            colors = SwitchDefaults.colors(
-                checkedThumbColor = ObsidianBlack,
-                checkedTrackColor = ChampagneGold,
-                uncheckedThumbColor = TextSecondary,
-                uncheckedTrackColor = CharcoalElevated
-            )
-        )
-    }
-}
-
-@Composable
 private fun DownloadManagerSection(
     activeDownloads: List<com.crank.music.ui.viewmodel.DownloadTask>,
     downloadsPaused: Boolean,
@@ -949,7 +646,7 @@ private fun DownloadManagerSection(
                     Icon(
                         imageVector = Icons.Default.Check,
                         contentDescription = null,
-                        tint = Color(0xFF4CAF50),
+                        tint = SuccessGreen,
                         modifier = Modifier.size(40.dp)
                     )
                     Spacer(modifier = Modifier.height(8.dp))
@@ -1032,10 +729,10 @@ private fun DownloadTaskCard(
     val statusColor by animateColorAsState(
         targetValue = when (task.status) {
             DownloadStatus.DOWNLOADING -> ChampagneGold
-            DownloadStatus.PAUSED -> Color(0xFFFF9800)
-            DownloadStatus.FAILED -> Color(0xFFFF5252)
+            DownloadStatus.PAUSED -> WarningAmber
+            DownloadStatus.FAILED -> ErrorRed
             DownloadStatus.QUEUED -> TextSecondary
-            DownloadStatus.COMPLETED -> Color(0xFF4CAF50)
+            DownloadStatus.COMPLETED -> SuccessGreen
         },
         animationSpec = tween(200),
         label = "status_color"
@@ -1136,7 +833,7 @@ private fun DownloadTaskCard(
                 Text(
                     text = "Download failed — tap retry",
                     style = MaterialTheme.typography.labelSmall,
-                    color = Color(0xFFFF5252)
+                    color = ErrorRed
                 )
             }
 
@@ -1206,7 +903,7 @@ private fun DownloadTaskCard(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(8.dp))
                                 .clickable { onRetry() },
-                            color = Color(0xFFFF5252).copy(alpha = 0.15f),
+                            color = ErrorRed.copy(alpha = 0.15f),
                             shape = RoundedCornerShape(8.dp)
                         ) {
                             Row(
@@ -1216,14 +913,14 @@ private fun DownloadTaskCard(
                                 Icon(
                                     imageVector = Icons.Default.Refresh,
                                     contentDescription = "Retry",
-                                    tint = Color(0xFFFF5252),
+                                    tint = ErrorRed,
                                     modifier = Modifier.size(14.dp)
                                 )
                                 Spacer(modifier = Modifier.width(4.dp))
                                 Text(
                                     text = "Retry",
                                     style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
-                                    color = Color(0xFFFF5252)
+                                    color = ErrorRed
                                 )
                             }
                         }
@@ -1247,14 +944,14 @@ private fun DownloadTaskCard(
                         Icon(
                             imageVector = Icons.Default.Close,
                             contentDescription = "Cancel",
-                            tint = Color(0xFFFF5252),
+                            tint = ErrorRed,
                             modifier = Modifier.size(14.dp)
                         )
                         Spacer(modifier = Modifier.width(4.dp))
                         Text(
                             text = "Cancel",
                             style = MaterialTheme.typography.labelMedium,
-                            color = Color(0xFFFF5252)
+                            color = ErrorRed
                         )
                     }
                 }
@@ -1264,25 +961,6 @@ private fun DownloadTaskCard(
 }
 
 @Composable
-private fun SectionHeader(
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    title: String
-) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Icon(
-            imageVector = icon,
-            contentDescription = null,
-            tint = ChampagneGold,
-            modifier = Modifier.size(18.dp)
-        )
-        Spacer(modifier = Modifier.width(8.dp))
-        Text(
-            text = title,
-            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-            color = WarmWhite
-        )
-    }
-}
 
 private fun formatBytes(bytes: Long): String {
     return when {
@@ -1292,3 +970,7 @@ private fun formatBytes(bytes: Long): String {
         else -> "$bytes B"
     }
 }
+
+// The private SectionHeader that lived here was one of five per-screen copies of the same
+// Icon + title row. It is now the shared com.crank.music.ui.components.SectionHeader, so an
+// icon-size or typography change lands on every settings screen at once instead of drifting.

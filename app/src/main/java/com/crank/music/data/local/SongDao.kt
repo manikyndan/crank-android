@@ -53,11 +53,70 @@ interface SongDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertHistoryItem(history: HistoryEntity)
 
+    /**
+     * Records another play of an already-known song, returning the number of rows updated.
+     *
+     * A zero result means the song has never been played, so the caller inserts a fresh row with
+     * `playCount = 1`. Doing it in this order — update first, insert only on a miss — keeps a first
+     * play from being counted twice, which a plain "insert then increment" would do.
+     *
+     * `playCount = playCount + 1` is evaluated by SQLite against the stored value, so concurrent
+     * calls cannot lose an increment the way a read-modify-write from Kotlin would. Deliberately not
+     * an `ON CONFLICT ... DO UPDATE` upsert: that needs SQLite 3.24, and this app supports API 24.
+     */
+    @Query(
+        "UPDATE playback_history SET playCount = playCount + 1, playedAt = :playedAt " +
+            "WHERE songId = :songId"
+    )
+    suspend fun bumpHistory(songId: String, playedAt: Long): Int
+
+    /**
+     * Adds actually-listened time to a song's running total.
+     *
+     * Accumulated rather than replaced: this is the sum of the seconds playback was running on this
+     * track across every play, so it grows monotonically and a skip adds only what was heard.
+     */
+    @Query("UPDATE playback_history SET listenedMs = listenedMs + :deltaMs WHERE songId = :songId")
+    suspend fun addListenedMs(songId: String, deltaMs: Long)
+
+    /**
+     * Total *listened* milliseconds across all history.
+     *
+     * Replaces a `SUM(durationMs)`, which counted a song's full nominal length even when the user
+     * skipped it — the reason "Total Listening" could exceed the time the app had been installed.
+     */
+    @Query("SELECT COALESCE(SUM(listenedMs), 0) FROM playback_history")
+    suspend fun getTotalListenedMs(): Long
+
+    /**
+     * Total plays including repeats.
+     *
+     * The correct numerator for "Songs Played". `COUNT(*)` would report distinct songs, because the
+     * table is keyed on `songId`.
+     */
+    @Query("SELECT COALESCE(SUM(playCount), 0) FROM playback_history")
+    suspend fun getTotalPlayCount(): Int
+
+    /** Distinct songs ever played — a genuinely different figure from [getTotalPlayCount]. */
+    @Query("SELECT COUNT(*) FROM playback_history")
+    suspend fun getDistinctSongCount(): Int
+
     @Query("SELECT * FROM playback_history ORDER BY playedAt DESC LIMIT 30")
     fun getHistory(): Flow<List<HistoryEntity>>
 
     @Query("SELECT * FROM playback_history ORDER BY playedAt DESC LIMIT :limit")
     suspend fun getHistoryList(limit: Int): List<HistoryEntity>
+
+    /**
+     * History ordered by how often each song was played.
+     *
+     * `getHistoryList` orders by `playedAt`, which is correct for "Recently played" but was also
+     * being used for the library's "Most played" tab — so that tab actually showed the most recent
+     * songs, in the same order as the tab above it. Only now that `playCount` exists can the two be
+     * told apart.
+     */
+    @Query("SELECT * FROM playback_history ORDER BY playCount DESC, playedAt DESC LIMIT :limit")
+    suspend fun getMostPlayedHistory(limit: Int): List<HistoryEntity>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertSearchQuery(query: SearchHistoryEntity)
@@ -93,13 +152,23 @@ interface SongDao {
     @Query("SELECT COUNT(*) FROM playback_history")
     suspend fun getHistoryCount(): Int
 
-    // Multiply by 1.0 first so SQLite promotes to REAL and we keep the fractional
-    // minutes. A bare `SUM(durationMs) / 60000` on an INTEGER column performs
-    // integer division, which silently truncates every partial minute.
-    @Query("SELECT CAST(COALESCE(SUM(durationMs), 0) AS REAL) / 60000.0 FROM playback_history")
-    suspend fun getTotalListeningMinutes(): Double
+    /**
+     * Deletes every playback-history row.
+     *
+     * Existed only as a UI promise before this: the Privacy screen flipped a flag to "cleared" and
+     * told the user their history was gone, while the rows — and everything derived from them, such
+     * as Music DNA — stayed exactly as they were.
+     */
+    @Query("DELETE FROM playback_history")
+    suspend fun clearHistory()
 
-    @Query("SELECT artistName FROM playback_history GROUP BY artistName ORDER BY COUNT(*) DESC LIMIT 1")
+    @Query("SELECT COUNT(*) FROM search_history")
+    suspend fun getSearchHistoryCount(): Int
+
+    @Query("DELETE FROM search_history")
+    suspend fun clearSearchHistory()
+
+    @Query("SELECT artistName FROM playback_history GROUP BY artistName ORDER BY SUM(playCount) DESC LIMIT 1")
     suspend fun getTopArtist(): String?
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)

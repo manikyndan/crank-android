@@ -47,7 +47,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.AutoAwesome
-import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
@@ -62,7 +61,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -89,17 +88,20 @@ import com.crank.music.domain.model.Song
 import com.crank.music.ui.viewmodel.BackgroundMood
 import com.crank.music.ui.viewmodel.ChatMessage
 import com.crank.music.ui.theme.ChampagneGold
+import androidx.compose.foundation.isSystemInDarkTheme
 import com.crank.music.ui.theme.CharcoalElevated
 import com.crank.music.ui.theme.CharcoalSurface
 import com.crank.music.ui.theme.GoldDark
+import com.crank.music.ui.theme.GlassBorder
+import com.crank.music.ui.theme.GlassSurface
 import com.crank.music.ui.theme.GoldMuted
 import com.crank.music.ui.theme.ObsidianBlack
+import com.crank.music.ui.theme.WarningAmber
 import com.crank.music.ui.theme.TextSecondary
 import com.crank.music.ui.theme.TextTertiary
 import com.crank.music.ui.theme.WarmWhite
 import com.crank.music.ui.viewmodel.CrankAiViewModel
 import com.crank.music.ui.viewmodel.Sender
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 @Composable
@@ -108,57 +110,27 @@ fun CrankAIScreen(
     onSongSelect: (Song) -> Unit = {},
     onBackClick: () -> Unit = {}
 ) {
-    val uiState by crankAiViewModel.uiState.collectAsState()
+    val uiState by crankAiViewModel.uiState.collectAsStateWithLifecycle()
     val view = LocalView.current
     // Read the accent here: a drawBehind lambda is not a @Composable scope.
     val accentColor = ChampagneGold
     val accentDark = GoldDark
+
+    // Hoisted out of the draw lambda below: these are @Composable getters reading the active palette,
+    // and a DrawScope is not a composable context. Reading them here also means the send button's
+    // gradient is built from the palette that was current when the composition ran rather than being
+    // re-resolved per frame.
+    val warningAccent = WarningAmber
     val listState = rememberLazyListState()
     var showInput by remember { mutableStateOf(true) }
 
-    val backgroundBrush = when (uiState.backgroundMood) {
-        BackgroundMood.RAIN_NIGHT -> Brush.verticalGradient(
-            colors = listOf(
-                Color(0xFF0A1628),
-                Color(0xFF0D1F3C),
-                Color(0xFF060E1A),
-                ObsidianBlack
-            )
-        )
-        BackgroundMood.WORKOUT -> Brush.verticalGradient(
-            colors = listOf(
-                Color(0xFF2A0A0A),
-                Color(0xFF1A0505),
-                Color(0xFF0A0202),
-                ObsidianBlack
-            )
-        )
-        BackgroundMood.PARTY -> Brush.verticalGradient(
-            colors = listOf(
-                Color(0xFF1A0A2A),
-                Color(0xFF100520),
-                Color(0xFF050210),
-                ObsidianBlack
-            )
-        )
-        BackgroundMood.FOCUS -> Brush.verticalGradient(
-            colors = listOf(
-                Color(0xFF0A1A1A),
-                Color(0xFF051010),
-                ObsidianBlack
-            )
-        )
-        BackgroundMood.SLEEP -> Brush.verticalGradient(
-            colors = listOf(
-                Color(0xFF0A0A1A),
-                Color(0xFF050510),
-                ObsidianBlack
-            )
-        )
-        else -> Brush.verticalGradient(
-            colors = listOf(ObsidianBlack, ObsidianBlack)
-        )
-    }
+    // Every stop of the mood gradient used to be a fixed near-black literal, while the chat text on
+    // top of it is themed (`WarmWhite`, which is black in light mode). With the Light theme selected
+    // that produced dark text on a dark scene — the Crank AI screen was effectively unreadable. The
+    // moods now resolve through this helper, which keeps the scene's hue but inverts its lightness, so
+    // the gradient and the text always move together.
+    val isLightTheme = !isSystemInDarkTheme()
+    val backgroundBrush = moodBrush(uiState.backgroundMood, isLightTheme)
 
     LaunchedEffect(uiState.messages.size) {
         if (uiState.messages.isNotEmpty()) {
@@ -308,21 +280,6 @@ fun CrankAIScreen(
                         .padding(horizontal = 12.dp, vertical = 12.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    IconButton(
-                        onClick = {
-                            crankAiViewModel.toggleRecording()
-                            view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
-                        },
-                        modifier = Modifier.size(44.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Mic,
-                            contentDescription = "Voice Input",
-                            tint = if (uiState.isRecording) Color.Red else TextSecondary,
-                            modifier = Modifier.size(24.dp)
-                        )
-                    }
-
                     Box(
                         modifier = Modifier
                             .weight(1f)
@@ -367,7 +324,7 @@ fun CrankAIScreen(
                                 drawCircle(
                                     brush = Brush.radialGradient(
                                         colors = listOf(
-                                            Color(0xFFFFC107),
+                                            warningAccent,
                                             accentColor,
                                             accentDark
                                         )
@@ -388,8 +345,76 @@ fun CrankAIScreen(
     }
 }
 
-private val GlassSurface = Color(0x1AFFFFFF)
-private val GlassBorder = Color(0x33FFFFFF)
+
+/**
+ * The ambience behind the Crank AI conversation, resolved for the active theme.
+ *
+ * Each mood is defined by a single hue; [isLightTheme] decides how far to push it toward black or
+ * white. Building both variants from one hue is what keeps this maintainable — the previous version
+ * listed nine near-black literals by hand and, because nothing tied them to the theme, the scene and
+ * the text on top of it could disagree.
+ *
+ * The final stop is the theme background, so the gradient meets the rest of the app cleanly in both
+ * modes instead of ending on a fixed black edge in light mode.
+ */
+@Composable
+private fun moodBrush(mood: BackgroundMood, isLightTheme: Boolean): Brush {
+    val background = ObsidianBlack
+
+    fun stops(variant: MoodVariant): Brush =
+        if (isLightTheme) {
+            Brush.verticalGradient(colors = listOf(variant.lightTop, variant.lightMid, background))
+        } else {
+            Brush.verticalGradient(colors = listOf(variant.darkTop, variant.darkMid, background))
+        }
+
+    return when (mood) {
+        // Deep navy at night; a pale blue wash in daylight.
+        BackgroundMood.RAIN_NIGHT -> stops(
+            MoodVariant(
+                darkTop = Color(0xFF0A1628), darkMid = Color(0xFF0D1F3C),
+                lightTop = Color(0xFFE8F0FA), lightMid = Color(0xFFD3E3F5)
+            )
+        )
+        // Ember red for a workout; a soft blush in light mode.
+        BackgroundMood.WORKOUT -> stops(
+            MoodVariant(
+                darkTop = Color(0xFF2A0A0A), darkMid = Color(0xFF1A0505),
+                lightTop = Color(0xFFFDEDED), lightMid = Color(0xFFF8DCDC)
+            )
+        )
+        // Violet for a party; lavender in light mode.
+        BackgroundMood.PARTY -> stops(
+            MoodVariant(
+                darkTop = Color(0xFF1A0A2A), darkMid = Color(0xFF100520),
+                lightTop = Color(0xFFF3EAFB), lightMid = Color(0xFFE6D8F5)
+            )
+        )
+        // Teal for focus; mint in light mode.
+        BackgroundMood.FOCUS -> stops(
+            MoodVariant(
+                darkTop = Color(0xFF0A1A1A), darkMid = Color(0xFF051010),
+                lightTop = Color(0xFFE6F4F2), lightMid = Color(0xFFCDE9E4)
+            )
+        )
+        // Indigo for sleep; cool grey-blue in light mode.
+        BackgroundMood.SLEEP -> stops(
+            MoodVariant(
+                darkTop = Color(0xFF0A0A1A), darkMid = Color(0xFF050510),
+                lightTop = Color(0xFFE9E9F5), lightMid = Color(0xFFD6D6EC)
+            )
+        )
+        else -> Brush.verticalGradient(colors = listOf(background, background))
+    }
+}
+
+/** The two gradient stops a mood needs, one pair per theme. */
+private data class MoodVariant(
+    val darkTop: Color,
+    val darkMid: Color,
+    val lightTop: Color,
+    val lightMid: Color
+)
 
 @Composable
 private fun AnimatedChatBubble(
@@ -438,7 +463,7 @@ private fun AnimatedChatBubble(
                 )
                 .background(
                     if (isUser) Brush.horizontalGradient(
-                        colors = listOf(ChampagneGold, Color(0xFFFFC107))
+                        colors = listOf(ChampagneGold, WarningAmber)
                     ) else SolidColor(CharcoalSurface)
                 )
                 .padding(horizontal = 16.dp, vertical = 12.dp)

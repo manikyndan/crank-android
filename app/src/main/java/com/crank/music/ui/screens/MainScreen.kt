@@ -1,5 +1,6 @@
 package com.crank.music.ui.screens
 
+import android.util.Log
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -11,7 +12,7 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -49,15 +50,30 @@ fun MainScreen(
     // Deep link from a tapped notification. Runs once per distinct non-null route; the caller
     // clears it through onRouteConsumed so a recomposition cannot navigate a second time.
     LaunchedEffect(startRoute) {
-        if (startRoute != null) {
-            navController.navigate(startRoute) { launchSingleTop = true }
-            onRouteConsumed()
+        val route = startRoute ?: return@LaunchedEffect
+
+        // This route arrives as an intent extra on an exported activity, so it is untrusted input
+        // from any app on the device. It used to be handed straight to `navigate`, which throws
+        // `IllegalArgumentException` for a route no destination matches — a one-line crash of the
+        // app's main activity, reachable from outside. Only parameterless routes the shell actually
+        // registers are accepted, and the navigation itself is wrapped because a malformed route
+        // string can still fail deep inside the navigator.
+        if (route in KNOWN_START_ROUTES) {
+            runCatching {
+                navController.navigate(route) { launchSingleTop = true }
+            }.onFailure {
+                Log.w(TAG, "Could not open start route '$route'", it)
+            }
+        } else {
+            Log.w(TAG, "Ignoring unknown start route '$route'")
         }
+
+        onRouteConsumed()
     }
 
-    val playerState by playerViewModel.playerState.collectAsState()
+    val playerState by playerViewModel.playerState.collectAsStateWithLifecycle()
     val song = playerState.currentSong
-    val isCurrentLiked by playerViewModel.isCurrentLiked.collectAsState()
+    val isCurrentLiked by playerViewModel.isCurrentLiked.collectAsStateWithLifecycle()
 
     // Raised from the mini player's "+" button. Held here, at the shell, so the sheet survives
     // tab switches instead of being torn down with whichever screen is on top.
@@ -459,6 +475,9 @@ fun MainScreen(
                     onAudioQualityClick = {
                         navController.navigate("audio_quality")
                     },
+                    onSourcesClick = {
+                        navController.navigate("source_settings")
+                    },
                     showUpdateBadge = false
                 )
             }
@@ -492,6 +511,7 @@ fun MainScreen(
             }
             composable("playback_settings") {
                 PlaybackSettingsScreen(
+                    playerViewModel = playerViewModel,
                     onBackClick = {
                         navController.popBackStack()
                     }
@@ -499,6 +519,13 @@ fun MainScreen(
             }
             composable("audio_quality") {
                 AudioQualityScreen(
+                    onBackClick = {
+                        navController.popBackStack()
+                    }
+                )
+            }
+            composable("source_settings") {
+                SourceSettingsScreen(
                     onBackClick = {
                         navController.popBackStack()
                     }
@@ -547,6 +574,37 @@ private fun albumRoute(album: Album): String {
 }
 
 /**
+ * Routes an external launch may open.
+ *
+ * Deliberately only the parameterless destinations: a route with arguments cannot be reached from a
+ * notification extra without also supplying them, and accepting arbitrary `{placeholder}` strings
+ * would just move the failure into the argument parsing. Anything outside this set is ignored.
+ */
+private val KNOWN_START_ROUTES = setOf(
+    "settings",
+    "appearance",
+    "privacy_security",
+    "offline_music",
+    "update_checker",
+    "playback_settings",
+    "audio_quality",
+    "source_settings",
+    "crank_ai",
+    "equalizer",
+    "music_dna",
+    "downloads",
+    "queue",
+    "lyrics",
+    "recognition",
+    "liked_music",
+    "now_playing",
+    "search",
+)
+
+/** Tag for the few recoverable failures this shell can hit from outside input. */
+private const val TAG = "CRANK_NAV"
+
+/**
  * Routes that hide the bottom navigation bar because they render edge-to-edge.
  *
  * A named set rather than an inline `||` chain: the previous form was a single 600-character
@@ -563,6 +621,7 @@ private val FULLSCREEN_ROUTES = setOf(
     "update_checker",
     "playback_settings",
     "audio_quality",
+    "source_settings",
     "crank_ai",
     "equalizer",
     "music_dna",

@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?><!--
+   Cleartext policy.
+
+   The app talks to two kinds of host:
+
+     1. YouTube / Gaana CDNs — always HTTPS. Nothing here should ever need to weaken this.
+     2. An optional self-hosted GaanaPy server (`settings.source.gaana_base_url`), which a
+        developer may run locally over plain http.
+
+   The default is therefore `cleartextTrafficPermitted="false"` — Android 9+ already blocks
+   cleartext, and this makes that explicit rather than implicit. Cleartext is re-enabled only
+   for the loopback and emulator aliases below, which cannot leave the device or the host
+   machine and so cannot be intercepted on a network.
+
+   ## Adding a LAN server
+
+   If your GaanaPy instance runs on another machine over http (e.g. `http://192.168.1.42:8000`),
+   its literal address must be listed here — Android's config is static and does not accept
+   wildcards or runtime values, so the base-URL setting alone cannot grant it access. Add a
+   `domain-config` block of the same shape as the one below with the real IP:
+
+       <domain-config cleartextTrafficPermitted="true">
+           <domain includeSubdomains="false">192.168.1.42</domain>
+       </domain-config>
+
+   Prefer a tunnel (ngrok, Cloudflare Tunnel, Tailscale) over a LAN IP where possible: that
+   gives you HTTPS and needs no change here at all. Never widen this to a base-config-level
+   cleartext allowance — that would permit every host in the app to be downgraded.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false" />
+
+    <!-- Loopback and the Android emulator's alias for the host machine. -->
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">localhost</domain>
+        <domain includeSubdomains="false">127.0.0.1</domain>
+        <domain includeSubdomains="false">10.0.2.2</domain>
+    </domain-config>
+</network-security-config>

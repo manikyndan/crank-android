@@ -6,7 +6,6 @@ import com.crank.music.core.rethrowIfCancellation
 import com.crank.music.domain.model.Song
 import com.crank.music.domain.repository.MusicRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -45,7 +44,6 @@ data class CrankAiUiState(
     val isThinking: Boolean = false,
     val moodValue: Float = 0.5f,
     val backgroundMood: BackgroundMood = BackgroundMood.DEFAULT,
-    val isRecording: Boolean = false,
     val conversationContext: List<String> = emptyList()
 )
 
@@ -84,10 +82,6 @@ class CrankAiViewModel @Inject constructor(
         sendMessage()
     }
 
-    fun toggleRecording() {
-        _uiState.value = _uiState.value.copy(isRecording = !_uiState.value.isRecording)
-    }
-
     fun sendMessage() {
         val prompt = _uiState.value.currentInput.trim()
         if (prompt.isBlank() || _uiState.value.isThinking) return
@@ -97,11 +91,6 @@ class CrankAiViewModel @Inject constructor(
         val updatedContext = _uiState.value.conversationContext + prompt
 
         val detectedMood = detectBackgroundMood(prompt)
-        val moodLabel = when {
-            _uiState.value.moodValue < 0.3f -> "chill and relaxed"
-            _uiState.value.moodValue > 0.7f -> "high energy and intense"
-            else -> "moderate vibes"
-        }
 
         _uiState.value = _uiState.value.copy(
             messages = updatedMessages,
@@ -112,9 +101,7 @@ class CrankAiViewModel @Inject constructor(
         )
 
         viewModelScope.launch {
-            delay(800L)
-
-            val searchQuery = translateMoodToQuery(prompt, moodLabel)
+            val searchQuery = translateMoodToQuery(prompt)
             val songs = try {
                 musicRepository.search(searchQuery)
             } catch (e: Exception) {
@@ -179,7 +166,14 @@ class CrankAiViewModel @Inject constructor(
         }
     }
 
-    private fun translateMoodToQuery(mood: String, moodLabel: String): String {
+    /**
+     * Maps a mood to a search query.
+     *
+     * The unused `moodLabel` parameter is gone: it was computed on every send and never read, so the
+     * mood slider's *label* had no effect on anything while the slider's value did (through
+     * [energyModifier] below).
+     */
+    private fun translateMoodToQuery(mood: String): String {
         val lower = mood.lowercase()
 
         val energyModifier = when {

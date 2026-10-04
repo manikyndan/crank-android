@@ -5,12 +5,13 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.crank.music.core.rethrowIfCancellation
 import com.crank.music.data.local.SongDao
-import com.crank.music.domain.repository.MusicRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import javax.inject.Inject
 
 data class ProfileUiState(
@@ -18,8 +19,10 @@ data class ProfileUiState(
     val email: String = "",
     val isPremium: Boolean = false,
     val totalHours: String = "0",
-    val topGenre: String = "N/A",
-    val monthlyStreak: String = "0 Days",
+    /** The artist played most often, by play count. */
+    val favoriteArtist: String = "N/A",
+    /** Lifetime play count, including repeats. */
+    val totalPlays: String = "0 plays",
     val avatarUrl: String = ""
 )
 
@@ -38,27 +41,32 @@ class ProfileViewModel @Inject constructor(
     private fun loadProfileData() {
         viewModelScope.launch {
             try {
-                // Calculate real listening stats from history
-                val historyCount = songDao.getHistoryCount()
-                val totalMinutes = songDao.getTotalListeningMinutes()
-                // Keep one decimal so short sessions don't all collapse to "0".
-                val totalHours = totalMinutes / 60.0
-                val totalHoursLabel = if (totalHours >= 10.0) {
-                    totalHours.toLong().toString()
-                } else {
-                    String.format(java.util.Locale.US, "%.1f", totalHours)
+                // Real listening stats, read off the main thread. The DAO calls were previously made
+                // directly on the Main dispatcher, which is a disk read in a composable's backing
+                // ViewModel init.
+                val (topArtist, totalHoursLabel, playCount) = withContext(Dispatchers.IO) {
+                    val listenedMs = songDao.getTotalListenedMs()
+                    val totalHours = listenedMs / 3_600_000.0
+                    // Keep one decimal so short sessions don't all collapse to "0".
+                    val hoursLabel = if (totalHours >= 10.0) {
+                        totalHours.toLong().toString()
+                    } else {
+                        String.format(java.util.Locale.US, "%.1f", totalHours)
+                    }
+                    Triple(songDao.getTopArtist(), hoursLabel, songDao.getTotalPlayCount())
                 }
-
-                // Get top artist from history
-                val topArtist = songDao.getTopArtist() ?: "N/A"
 
                 _uiState.value = ProfileUiState(
                     name = "Music Lover",
                     email = "",
                     isPremium = false,
                     totalHours = totalHoursLabel,
-                    topGenre = topArtist,
-                    monthlyStreak = "$historyCount sessions",
+                    // Labelled "Favorite Artist" by the screen. It previously read "Top Genre" while
+                    // being filled with an artist name.
+                    favoriteArtist = topArtist ?: "N/A",
+                    // Was "monthlyStreak" holding a lifetime session count under a label that said
+                    // "Days". Now it is explicitly a play count.
+                    totalPlays = "$playCount plays",
                     avatarUrl = ""
                 )
             } catch (e: Exception) {

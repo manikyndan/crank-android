@@ -51,7 +51,7 @@ import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -77,11 +77,9 @@ import com.crank.music.ui.theme.TextSecondary
 import com.crank.music.ui.theme.TextTertiary
 import com.crank.music.ui.theme.WarmWhite
 import com.crank.music.ui.viewmodel.AppearanceSettingsViewModel
-import com.crank.music.ui.viewmodel.AlbumArtShape
 import com.crank.music.ui.viewmodel.AppearanceUiState
-import com.crank.music.ui.viewmodel.BackgroundStyle
-import com.crank.music.ui.viewmodel.ThemeMode
 import com.crank.music.ui.viewmodel.TypographyScale
+import com.crank.music.ui.viewmodel.ThemeMode
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -89,7 +87,7 @@ fun AppearanceSettingsScreen(
     viewModel: AppearanceSettingsViewModel = hiltViewModel(),
     onBackClick: () -> Unit = {}
 ) {
-    val uiState by viewModel.uiState.collectAsState()
+    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val view = LocalView.current
 
     Column(
@@ -156,60 +154,10 @@ fun AppearanceSettingsScreen(
             }
 
             item {
-                DynamicMaterialYouSection(
-                    enabled = uiState.isDynamicMaterialYou,
-                    onToggle = {
-                        viewModel.toggleDynamicMaterialYou(it)
-                        view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
-                    }
-                )
-            }
-
-            item {
                 TypographySection(
                     selected = uiState.typographyScale,
                     onSelect = {
                         viewModel.setTypographyScale(it)
-                        view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
-                    }
-                )
-            }
-
-            item {
-                AlbumArtShapeSection(
-                    selected = uiState.albumArtShape,
-                    onSelect = {
-                        viewModel.setAlbumArtShape(it)
-                        view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
-                    }
-                )
-            }
-
-            item {
-                BackgroundStyleSection(
-                    selected = uiState.backgroundStyle,
-                    onSelect = {
-                        viewModel.setBackgroundStyle(it)
-                        view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
-                    }
-                )
-            }
-
-            item {
-                TogglesSection(
-                    showLyricsBlur = uiState.showLyricsBlur,
-                    animatedTransitions = uiState.animatedTransitions,
-                    reduceMotion = uiState.reduceMotion,
-                    onLyricsBlurToggle = {
-                        viewModel.toggleLyricsBlur(it)
-                        view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
-                    },
-                    onAnimatedTransitionsToggle = {
-                        viewModel.toggleAnimatedTransitions(it)
-                        view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
-                    },
-                    onReduceMotionToggle = {
-                        viewModel.toggleReduceMotion(it)
                         view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
                     }
                 )
@@ -238,6 +186,10 @@ private fun LivePreviewSection(uiState: com.crank.music.ui.viewmodel.AppearanceU
         )
         Spacer(modifier = Modifier.height(10.dp))
 
+        // Literal colours on purpose: this preview has to render what a theme *looks like*, including
+        // the one that is not currently applied. A token would resolve to the active theme and the
+        // preview would show the same swatch for all four choices, which is the bug this screen
+        // exists to avoid. The surrounding chrome still uses tokens and so still follows the theme.
         val previewBg = when (uiState.themeMode) {
             ThemeMode.LIGHT -> Color(0xFFF5F5F5)
             ThemeMode.OLED -> Color(0xFF000000)
@@ -262,11 +214,10 @@ private fun LivePreviewSection(uiState: com.crank.music.ui.viewmodel.AppearanceU
                     Surface(
                         modifier = Modifier.size(64.dp),
                         color = CharcoalSurface,
-                        shape = when (uiState.albumArtShape) {
-                            AlbumArtShape.CIRCLE -> CircleShape
-                            AlbumArtShape.SQUIRCLE -> RoundedCornerShape(16.dp)
-                            AlbumArtShape.ROUNDED_SQUARE -> RoundedCornerShape(12.dp)
-                        }
+                        // Fixed, because the album-art shape setting it used to read has been
+                        // removed: the choice existed only in this preview and changed no album art
+                        // anywhere in the app. The preview now shows the shape the app really uses.
+                        shape = RoundedCornerShape(12.dp)
                     ) {
                         Box(contentAlignment = Alignment.Center) {
                             Icon(
@@ -560,31 +511,11 @@ private fun AccentColorChip(
 }
 
 @Composable
-private fun DynamicMaterialYouSection(
-    enabled: Boolean,
-    onToggle: (Boolean) -> Unit
-) {
-    Column(modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp)) {
-        SectionTitle(icon = Icons.Default.Image, title = "Dynamic Colors")
-        Spacer(modifier = Modifier.height(10.dp))
-
-        SettingToggleRow(
-            title = "Material You",
-            subtitle = "Extract colors from album art",
-            isEnabled = enabled,
-            onToggle = onToggle
-        )
-    }
-}
-
-@Composable
 private fun TypographySection(
     selected: TypographyScale,
     onSelect: (TypographyScale) -> Unit
 ) {
     Column(modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp)) {
-        SectionTitle(icon = Icons.Default.TextFields, title = "Typography")
-        Spacer(modifier = Modifier.height(10.dp))
 
         Surface(
             modifier = Modifier.fillMaxWidth(),
@@ -648,185 +579,6 @@ private fun TypographySection(
                         }
                     }
                 }
-            }
-        }
-    }
-}
-
-@Composable
-private fun AlbumArtShapeSection(
-    selected: AlbumArtShape,
-    onSelect: (AlbumArtShape) -> Unit
-) {
-    Column(modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp)) {
-        SectionTitle(icon = Icons.Default.Image, title = "Album Art Shape")
-        Spacer(modifier = Modifier.height(10.dp))
-
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceEvenly
-        ) {
-            AlbumArtShape.entries.forEach { shape ->
-                val isSelected = shape == selected
-                Column(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(12.dp))
-                        .clickable { onSelect(shape) }
-                        .padding(8.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(60.dp)
-                            .clip(
-                                when (shape) {
-                                    AlbumArtShape.CIRCLE -> CircleShape
-                                    AlbumArtShape.SQUIRCLE -> RoundedCornerShape(16.dp)
-                                    AlbumArtShape.ROUNDED_SQUARE -> RoundedCornerShape(8.dp)
-                                }
-                            )
-                            .background(
-                                Brush.verticalGradient(
-                                    colors = listOf(ChampagneGold, ChampagneGold.copy(alpha = 0.5f))
-                                )
-                            ),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.MusicNote,
-                            contentDescription = null,
-                            tint = ObsidianBlack,
-                            modifier = Modifier.size(28.dp)
-                        )
-                    }
-                    Spacer(modifier = Modifier.height(6.dp))
-                    Text(
-                        text = shape.label,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = if (isSelected) ChampagneGold else TextSecondary,
-                        textAlign = TextAlign.Center
-                    )
-                    if (isSelected) {
-                        Icon(
-                            imageVector = Icons.Default.Check,
-                            contentDescription = null,
-                            tint = ChampagneGold,
-                            modifier = Modifier.size(14.dp)
-                        )
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun BackgroundStyleSection(
-    selected: BackgroundStyle,
-    onSelect: (BackgroundStyle) -> Unit
-) {
-    Column(modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp)) {
-        SectionTitle(icon = Icons.Default.FormatQuote, title = "Background Style")
-        Spacer(modifier = Modifier.height(10.dp))
-
-        LazyRow(
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-            contentPadding = PaddingValues(horizontal = 4.dp)
-        ) {
-            items(BackgroundStyle.entries.toList()) { style ->
-                val isSelected = style == selected
-                Surface(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(14.dp))
-                        .clickable { onSelect(style) },
-                    color = if (isSelected) ChampagneGold.copy(alpha = 0.15f) else CharcoalSurface,
-                    shape = RoundedCornerShape(14.dp),
-                    border = if (isSelected) BorderStroke(2.dp, ChampagneGold) else null
-                ) {
-                    Column(
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(40.dp)
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(
-                                    when (style) {
-                                        BackgroundStyle.SOLID -> Brush.verticalGradient(
-                                            colors = listOf(ObsidianBlack, ObsidianBlack)
-                                        )
-                                        BackgroundStyle.GRADIENT -> Brush.verticalGradient(
-                                            colors = listOf(ChampagneGold.copy(alpha = 0.3f), ObsidianBlack)
-                                        )
-                                        BackgroundStyle.DYNAMIC -> Brush.verticalGradient(
-                                            colors = listOf(Color(0xFF4A90D9), Color(0xFF9C27B0), ObsidianBlack)
-                                        )
-                                    }
-                                ),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = when (style) {
-                                    BackgroundStyle.SOLID -> Icons.Default.DarkMode
-                                    BackgroundStyle.GRADIENT -> Icons.Default.WbSunny
-                                    BackgroundStyle.DYNAMIC -> Icons.Default.Image
-                                },
-                                contentDescription = null,
-                                tint = WarmWhite,
-                                modifier = Modifier.size(18.dp)
-                            )
-                        }
-                        Spacer(modifier = Modifier.height(6.dp))
-                        Text(
-                            text = style.label,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = if (isSelected) ChampagneGold else TextSecondary
-                        )
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun TogglesSection(
-    showLyricsBlur: Boolean,
-    animatedTransitions: Boolean,
-    reduceMotion: Boolean,
-    onLyricsBlurToggle: (Boolean) -> Unit,
-    onAnimatedTransitionsToggle: (Boolean) -> Unit,
-    onReduceMotionToggle: (Boolean) -> Unit
-) {
-    Column(modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp)) {
-        SectionTitle(icon = Icons.Default.Tune, title = "Effects & Accessibility")
-        Spacer(modifier = Modifier.height(10.dp))
-
-        Surface(
-            modifier = Modifier.fillMaxWidth(),
-            color = CharcoalSurface,
-            shape = RoundedCornerShape(14.dp)
-        ) {
-            Column {
-                SettingToggleRow(
-                    title = "Lyrics Background Blur",
-                    subtitle = "Frosted glass effect on lyrics",
-                    isEnabled = showLyricsBlur,
-                    onToggle = onLyricsBlurToggle
-                )
-                SettingToggleRow(
-                    title = "Animated Transitions",
-                    subtitle = "Smooth screen animations",
-                    isEnabled = animatedTransitions,
-                    onToggle = onAnimatedTransitionsToggle
-                )
-                SettingToggleRow(
-                    title = "Reduce Motion",
-                    subtitle = "Accessibility: minimize animations",
-                    isEnabled = reduceMotion,
-                    onToggle = onReduceMotionToggle
-                )
             }
         }
     }

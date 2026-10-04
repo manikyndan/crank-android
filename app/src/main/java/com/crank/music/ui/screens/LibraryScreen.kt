@@ -61,7 +61,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -88,6 +88,7 @@ import com.crank.music.domain.model.Collection
 import com.crank.music.domain.model.Playlist
 import com.crank.music.domain.model.Song
 import com.crank.music.ui.components.ShimmerBox
+import com.crank.music.ui.components.EmptyState
 import com.crank.music.ui.viewmodel.AlbumItem
 import com.crank.music.ui.viewmodel.ArtistItem
 import com.crank.music.ui.viewmodel.LibrarySection
@@ -122,7 +123,7 @@ fun LibraryScreen(
     onAlbumClick: (Album) -> Unit = {},
     onBrowseClick: () -> Unit = {}
 ) {
-    val uiState by libraryViewModel.uiState.collectAsState()
+    val uiState by libraryViewModel.uiState.collectAsStateWithLifecycle()
     val view = LocalView.current
     val context = LocalContext.current
     var optionsTarget by remember { mutableStateOf<LibraryOptionsTarget?>(null) }
@@ -291,7 +292,7 @@ fun LibraryScreen(
                         }
                         if (visiblePlaylists.isEmpty() && previewSongs.isEmpty()) {
                             item {
-                                YtEmptyState(
+                                EmptyState(
                                     icon = Icons.Default.MusicNote,
                                     title = "Your library is empty",
                                     message = "Songs you like and playlists you create will show up here",
@@ -305,7 +306,7 @@ fun LibraryScreen(
                     LibrarySection.RECENTLY_ADDED -> {
                         if (recentSongs.isEmpty()) {
                             item {
-                                YtEmptyState(
+                                EmptyState(
                                     icon = Icons.Default.History,
                                     title = "Nothing here yet",
                                     message = "Music you play will show up here",
@@ -355,7 +356,7 @@ fun LibraryScreen(
                         }
                         if (visiblePlaylists.isEmpty() && smartVisible.isEmpty()) {
                             item {
-                                YtEmptyState(
+                                EmptyState(
                                     icon = Icons.Default.FolderOpen,
                                     title = "Playlists you create will show up here",
                                     message = "Build your own collections of the music you love",
@@ -387,7 +388,7 @@ fun LibraryScreen(
                         val songs = libraryViewModel.getFilteredSongs()
                         if (songs.isEmpty()) {
                             item {
-                                YtEmptyState(
+                                EmptyState(
                                     icon = Icons.Default.MusicNote,
                                     title = "Songs you save will show up here",
                                     message = "Tap the like button on any song to keep it in your library",
@@ -429,7 +430,7 @@ fun LibraryScreen(
                     LibrarySection.ALBUMS -> {
                         if (uiState.albums.isEmpty()) {
                             item {
-                                YtEmptyState(
+                                EmptyState(
                                     icon = Icons.Default.Album,
                                     title = "Albums you save will show up here",
                                     message = "Albums from songs in your library appear automatically",
@@ -457,7 +458,7 @@ fun LibraryScreen(
                     LibrarySection.ARTISTS -> {
                         if (uiState.artists.isEmpty()) {
                             item {
-                                YtEmptyState(
+                                EmptyState(
                                     icon = Icons.Default.Person,
                                     title = "Artists you follow will show up here",
                                     message = "Artists from songs in your library appear automatically",
@@ -485,7 +486,7 @@ fun LibraryScreen(
                     LibrarySection.DOWNLOADED -> {
                         if (uiState.downloadedSongs.isEmpty()) {
                             item {
-                                YtEmptyState(
+                                EmptyState(
                                     icon = Icons.Default.Download,
                                     title = "Music you download will show up here",
                                     message = "Download songs to listen offline",
@@ -521,7 +522,7 @@ fun LibraryScreen(
                     LibrarySection.HISTORY -> {
                         if (uiState.historyItems.isEmpty()) {
                             item {
-                                YtEmptyState(
+                                EmptyState(
                                     icon = Icons.Default.History,
                                     title = "No listening history yet",
                                     message = "Songs you play will show up here",
@@ -1249,65 +1250,9 @@ private fun YtArtistRow(
     }
 }
 
-@Composable
-private fun YtEmptyState(
-    icon: ImageVector,
-    title: String,
-    message: String,
-    ctaText: String,
-    onCtaClick: () -> Unit,
-) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 32.dp, vertical = 48.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        Surface(
-            modifier = Modifier.size(72.dp),
-            shape = CircleShape,
-            color = MaterialTheme.colorScheme.surfaceVariant
-        ) {
-            Box(contentAlignment = Alignment.Center) {
-                Icon(
-                    imageVector = icon,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.size(32.dp)
-                )
-            }
-        }
-        Spacer(modifier = Modifier.height(16.dp))
-        Text(
-            text = title,
-            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-            color = MaterialTheme.colorScheme.onBackground,
-            textAlign = TextAlign.Center
-        )
-        Spacer(modifier = Modifier.height(8.dp))
-        Text(
-            text = message,
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            textAlign = TextAlign.Center
-        )
-        Spacer(modifier = Modifier.height(20.dp))
-        Surface(
-            modifier = Modifier
-                .clip(RoundedCornerShape(20.dp))
-                .clickable { onCtaClick() },
-            color = MaterialTheme.colorScheme.onBackground,
-            shape = RoundedCornerShape(20.dp)
-        ) {
-            Text(
-                text = ctaText,
-                style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
-                color = MaterialTheme.colorScheme.background,
-                modifier = Modifier.padding(horizontal = 24.dp, vertical = 10.dp)
-            )
-        }
-    }
-}
+// The private `YtEmptyState` that lived here was a second, near-identical empty state. Library now
+// uses the shared com.crank.music.ui.components.EmptyState, whose optional CTA it needed.
+
 
 @Composable
 private fun YtLoadingRows(count: Int = 8) {
@@ -1668,6 +1613,10 @@ private fun CreatePlaylistModal(
         else -> null
     }
     val canCreate = trimmedName.isNotEmpty() && nameError == null
+    // Literal colours are correct here, and deliberately not theme tokens: this is the swatch palette
+    // for a playlist cover the user picks, so the eight options must look like eight distinct colours
+    // regardless of light or dark mode. Routing them through the theme would make them change with the
+    // theme, which is the opposite of what a colour picker is for.
     val coverColors = listOf(
         Color(0xFFD4AF37),
         Color(0xFFE53935),

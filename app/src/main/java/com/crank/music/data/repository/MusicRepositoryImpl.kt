@@ -22,7 +22,8 @@ class MusicRepositoryImpl @Inject constructor(
     private val remoteDataSource: RemoteDataSource,
     private val streamResolver: StreamResolver,
     private val innerTubeApi: InnerTubeApi,
-    private val httpClient: HttpClient
+    private val httpClient: HttpClient,
+    private val audioQualityResolver: AudioQualityResolver,
 ) : MusicRepository {
 
     // Second-source lyrics. Kept here rather than inlined so the matching rules (query rewriting,
@@ -42,7 +43,7 @@ class MusicRepositoryImpl @Inject constructor(
 
     override suspend fun search(query: String): List<Song> {
         if (query.isBlank()) return emptyList()
-        val key = "search:$query"
+        val key = "search:" + TtlCache.normalizeKey(query)
 
         // 1. Fresh cache hit — serve instantly, no network, no cancellation churn.
         searchCache.get(key)?.let { return it }
@@ -79,7 +80,7 @@ class MusicRepositoryImpl @Inject constructor(
 
     override suspend fun searchAlbums(query: String): List<Album> {
         if (query.isBlank()) return emptyList()
-        val key = "albums:$query"
+        val key = "albums:" + TtlCache.normalizeKey(query)
 
         // 1. Fresh cache hit.
         albumSearchCache.get(key)?.let { return it }
@@ -109,7 +110,7 @@ class MusicRepositoryImpl @Inject constructor(
 
     override suspend fun searchAlbumsWithKind(query: String): List<AlbumWithKind> {
         if (query.isBlank()) return emptyList()
-        val key = "albumskind:$query"
+        val key = "albumskind:" + TtlCache.normalizeKey(query)
 
         albumKindCache.get(key)?.let { return it }
 
@@ -191,7 +192,16 @@ class MusicRepositoryImpl @Inject constructor(
 
     override suspend fun getSongStreamUrl(songId: String, songTitle: String, artistName: String): StreamData {
         Log.d("CRANK_INTEGRATION", "MusicRepositoryImpl.getSongStreamUrl for: $songId ($songTitle - $artistName)")
-        val streamData = streamResolver.resolveStreamUrl(songId, songTitle, artistName)
+        // The quality ceiling is resolved here, at the point of use, rather than stored: it depends
+        // on the network the device is on right now, which can change between two plays of the same
+        // song. Until this existed the audio-quality setting and Data Saver were persisted and then
+        // ignored — the resolver always took the highest bitrate available.
+        val streamData = streamResolver.resolveStreamUrl(
+            videoId = songId,
+            songTitle = songTitle,
+            artistName = artistName,
+            maxBitrateKbps = audioQualityResolver.currentMaxBitrateKbps(),
+        )
         Log.d("CRANK_INTEGRATION", "MusicRepositoryImpl resolved URL: ${streamData.url.take(100)} for: $songId")
         return streamData
     }

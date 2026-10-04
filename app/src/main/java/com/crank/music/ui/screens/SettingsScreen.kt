@@ -23,6 +23,7 @@ import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.LibraryMusic
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PlayCircle
@@ -56,6 +57,7 @@ fun SettingsScreen(
     onUpdateClick: () -> Unit = {},
     onPlaybackClick: () -> Unit = {},
     onAudioQualityClick: () -> Unit = {},
+    onSourcesClick: () -> Unit = {},
     showUpdateBadge: Boolean = false
 ) {
     Column(
@@ -111,6 +113,13 @@ fun SettingsScreen(
                         title = "Playback",
                         subtitle = "Crossfade, Gapless & Normalization",
                         onClick = onPlaybackClick,
+                    )
+                    SettingsNavRow(
+                        // Core-set icon, guaranteed to exist: this screen is about where music comes from.
+                        icon = Icons.Default.LibraryMusic,
+                        title = "Music Sources",
+                        subtitle = "Optional self-hosted Gaana catalogue",
+                        onClick = onSourcesClick,
                         showDivider = false,
                     )
                 }

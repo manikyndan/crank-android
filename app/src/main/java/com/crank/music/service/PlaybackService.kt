@@ -1,6 +1,8 @@
 package com.crank.music.service
 
 import android.content.Intent
+import android.os.Process
+import android.util.Log
 import androidx.annotation.OptIn
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
@@ -22,16 +24,24 @@ class PlaybackService : MediaSessionService() {
     override fun onTaskRemoved(rootIntent: Intent?) {
         val player = mediaSession.player
         if ((!player.playWhenReady) || player.mediaItemCount == 0 || player.playbackState == Player.STATE_ENDED) {
+            // Stop and clear before letting the service go. stopSelf() alone left the Media3 media
+            // notification posted with no service behind it: the panel stayed in the shade, and
+            // tapping it reopened the app onto a session that had already been torn down.
+            player.stop()
+            player.clearMediaItems()
             stopSelf()
         }
         super.onTaskRemoved(rootIntent)
     }
 
     override fun onDestroy() {
-        mediaSession.run {
-            player.release()
-            release()
-        }
+        // The player and the session are process-scoped @Singleton objects provided by
+        // PlayerModule, and PlayerViewModel keeps using them after this service goes away.
+        // Releasing them here — as this used to — destroyed the singletons for the rest of the
+        // process: if the process survived a task swipe (it usually does), the next launch handed
+        // the UI a released player, so play/pause was a no-op or threw. Media3's player belongs to
+        // the app, not to this service; the OS reclaims it on process death, which is the only
+        // point at which it is genuinely finished with.
         super.onDestroy()
     }
 }
@@ -67,10 +77,37 @@ object RemoteControlBridge {
  */
 @OptIn(UnstableApi::class)
 internal object CrankSessionCallback : MediaSession.Callback {
+
+    private const val TAG = "CRANK_SESSION"
+
+    /**
+     * Platform packages allowed to drive playback.
+     *
+     * Kept as an explicit allowlist rather than a "not a third-party app" heuristic, so an OEM
+     * that ships its own media-control surface can be added deliberately instead of the check
+     * silently passing everything that is not obviously foreign.
+     */
+    private val TRUSTED_SYSTEM_PACKAGES = setOf(
+        "com.android.systemui",
+        "com.android.bluetooth",
+        "com.google.android.projection.gearhead",
+        "com.google.android.apps.automotive.mediacenter",
+        "android",
+    )
+
     override fun onConnect(
         session: MediaSession,
         controller: MediaSession.ControllerInfo,
     ): MediaSession.ConnectionResult {
+        if (!isTrustedController(session, controller)) {
+            Log.w(
+                TAG,
+                "Rejecting media controller from '${controller.packageName}' " +
+                    "(uid ${controller.uid})"
+            )
+            return MediaSession.ConnectionResult.reject()
+        }
+
         val playerCommands = MediaSession.ConnectionResult
             .DEFAULT_PLAYER_COMMANDS
             .buildUpon()
@@ -81,6 +118,32 @@ internal object CrankSessionCallback : MediaSession.Callback {
             MediaSession.ConnectionResult.DEFAULT_SESSION_COMMANDS,
             playerCommands
         )
+    }
+
+    /**
+     * Decides whether a connecting controller is allowed to drive playback.
+     *
+     * The service is exported (the system has to bind it), so without this check *any* app on the
+     * device could connect and issue transport commands — previous/next, play, pause, seek. The
+     * accepted set is deliberately narrow:
+     *
+     * - controllers from this app's own uid;
+     * - Media3's own media-notification controller, Android Auto and the Auto companion;
+     * - the platform system-ui packages, which host the media output switcher and media controls.
+     *
+     * Bluetooth and headset media buttons do not need a controller connection — the platform routes
+     * `ACTION_MEDIA_BUTTON` to the active session — so excluding third-party apps does not disable
+     * headset controls.
+     */
+    private fun isTrustedController(
+        session: MediaSession,
+        controller: MediaSession.ControllerInfo,
+    ): Boolean {
+        if (controller.uid == Process.myUid()) return true
+        if (session.isMediaNotificationController(controller)) return true
+        if (session.isAutomotiveController(controller)) return true
+        if (session.isAutoCompanionController(controller)) return true
+        return controller.packageName in TRUSTED_SYSTEM_PACKAGES
     }
 
     // Still the only place a client's skip request can be routed to this app's queue: ExoPlayer

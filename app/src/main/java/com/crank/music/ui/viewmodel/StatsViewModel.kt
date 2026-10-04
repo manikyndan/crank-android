@@ -3,6 +3,7 @@ package com.crank.music.ui.viewmodel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.crank.music.core.rethrowIfCancellation
+import com.crank.music.data.local.HistoryEntity
 import com.crank.music.data.local.SongDao
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
@@ -14,13 +15,6 @@ import kotlinx.coroutines.withContext
 import java.util.Calendar
 import java.util.Locale
 import javax.inject.Inject
-
-data class RadarDimension(
-    val name: String,
-    val value: Float,
-    val icon: String,
-    val description: String
-)
 
 data class HeatmapCell(
     val day: Int,
@@ -61,13 +55,11 @@ enum class TimePeriod(val label: String) {
 }
 
 data class MusicDnaUiState(
-    val radarDimensions: List<RadarDimension> = emptyList(),
     val heatmapData: List<HeatmapCell> = emptyList(),
     val statCards: List<StatCard> = emptyList(),
     val badges: List<Badge> = emptyList(),
     val timelineData: List<TimelinePoint> = emptyList(),
     val selectedPeriod: TimePeriod = TimePeriod.WEEKLY,
-    val selectedDimension: RadarDimension? = null,
     val selectedBadge: Badge? = null,
     val isLoaded: Boolean = false,
     /** True once the user has played anything. An empty history means nothing to show. */
@@ -85,7 +77,9 @@ data class MusicDnaUiState(
  * Everything is now computed from `playback_history`, the one table that records real
  * listening. Where a metric genuinely cannot be derived (audio-feature dimensions like
  * "Danceability", which YouTube search does not expose) the metric is omitted rather than
- * invented, so the screen shows less but never lies.
+ * invented, so the screen shows less but never lies. The radar chart was removed for exactly that
+ * reason: it was fed a hardcoded shape, and there is no audio-feature source in the app to feed it
+ * anything real.
  */
 @HiltViewModel
 class StatsViewModel @Inject constructor(
@@ -102,23 +96,26 @@ class StatsViewModel @Inject constructor(
     private fun loadAllData() {
         viewModelScope.launch {
             try {
-                val history = withContext(Dispatchers.IO) { songDao.getHistoryList(HISTORY_LIMIT) }
-                val totalMinutes = withContext(Dispatchers.IO) { songDao.getTotalListeningMinutes() }
-                val topArtist = withContext(Dispatchers.IO) { songDao.getTopArtist() }
+                // Read together: every card is derived from the same set of aggregates, so fetching
+                // them in one IO block keeps the numbers from being read at different instants.
+                val snapshot = withContext(Dispatchers.IO) {
+                    StatsSnapshot(
+                        history = songDao.getHistoryList(HISTORY_LIMIT),
+                        totalListenedMs = songDao.getTotalListenedMs(),
+                        totalPlayCount = songDao.getTotalPlayCount(),
+                        topArtist = songDao.getTopArtist(),
+                    )
+                }
 
-                val stats = buildStatCards(history, totalMinutes, topArtist)
-                lastHistory = history
+                lastHistory = snapshot.history
 
                 _uiState.value = MusicDnaUiState(
-                    // Radar is left empty: there is no audio-feature source in the app, and a
-                    // radar chart of invented values is worse than no chart.
-                    radarDimensions = emptyList(),
-                    heatmapData = buildHeatmap(history),
-                    statCards = stats,
-                    badges = buildBadges(history, totalMinutes),
-                    timelineData = buildTimeline(history),
+                    heatmapData = buildHeatmap(snapshot.history),
+                    statCards = buildStatCards(snapshot),
+                    badges = buildBadges(snapshot),
+                    timelineData = buildTimelineFor(TimePeriod.WEEKLY, snapshot.history),
                     isLoaded = true,
-                    hasListeningHistory = history.isNotEmpty(),
+                    hasListeningHistory = snapshot.history.isNotEmpty(),
                 )
             } catch (e: Exception) {
                 e.rethrowIfCancellation()
@@ -127,15 +124,26 @@ class StatsViewModel @Inject constructor(
         }
     }
 
+    /**
+     * The aggregates the screen is built from, read in one pass.
+     *
+     * `history` is capped at [HISTORY_LIMIT] rows for the timeline and heatmap, but the totals are
+     * whole-table aggregates. Previously the two were mixed inconsistently — the cards used a
+     * capped `SUM(durationMs)` while the chart used the same cap — so beyond 500 songs the numbers
+     * disagreed with each other without either being obviously wrong.
+     */
+    private data class StatsSnapshot(
+        val history: List<HistoryEntity>,
+        val totalListenedMs: Long,
+        val totalPlayCount: Int,
+        val topArtist: String?,
+    )
+
     fun selectPeriod(period: TimePeriod) {
         _uiState.value = _uiState.value.copy(
             selectedPeriod = period,
             timelineData = buildTimelineFor(period),
         )
-    }
-
-    fun selectDimension(dimension: RadarDimension?) {
-        _uiState.value = _uiState.value.copy(selectedDimension = dimension)
     }
 
     fun selectBadge(badge: Badge?) {
@@ -147,16 +155,17 @@ class StatsViewModel @Inject constructor(
     /**
      * Aggregate cards.
      *
-     * The trend figure is deliberately 0f for every card. A percentage change needs a
-     * previous period to compare against, and history rows carry a single `playedAt`
-     * timestamp with no prior window retained, so any delta would be fabricated.
+     * "Songs Played" now sums `playCount`, so playing one song five times reports 5. It previously
+     * reported `history.size`, which — because the history table is keyed on the song id — was a
+     * count of *distinct* songs and could never exceed it.
+     *
+     * The trend figure is deliberately 0f for every card. A percentage change needs a previous
+     * period to compare against, and history rows carry a single `playedAt` timestamp with no prior
+     * window retained, so any delta would be fabricated.
      */
-    private fun buildStatCards(
-        history: List<com.crank.music.data.local.HistoryEntity>,
-        totalMinutes: Double,
-        topArtist: String?,
-    ): List<StatCard> {
-        val totalHours = totalMinutes / 60.0
+    private fun buildStatCards(snapshot: StatsSnapshot): List<StatCard> {
+        val history = snapshot.history
+        val totalHours = snapshot.totalListenedMs / 3_600_000.0
         val cards = mutableListOf<StatCard>()
 
         cards += StatCard(
@@ -167,12 +176,12 @@ class StatsViewModel @Inject constructor(
         )
         cards += StatCard(
             label = "Songs Played",
-            value = history.size.toString(),
-            numericValue = history.size.toFloat(),
+            value = snapshot.totalPlayCount.toString(),
+            numericValue = snapshot.totalPlayCount.toFloat(),
             icon = "\uD83C\uDFB5",
         )
 
-        topArtist?.takeIf { it.isNotBlank() }?.let {
+        snapshot.topArtist?.takeIf { it.isNotBlank() }?.let {
             cards += StatCard("Favorite Artist", it, 0f, "\uD83C\uDFA4")
         }
 
@@ -186,10 +195,12 @@ class StatsViewModel @Inject constructor(
             )
         }
 
-        if (history.isNotEmpty()) {
-            val avgMinutes = totalMinutes / history.size
+        // Average is per *play*, not per distinct song, so it lines up with "Songs Played" above it
+        // and with the total it is derived from.
+        if (snapshot.totalPlayCount > 0) {
+            val avgMinutes = snapshot.totalListenedMs / 60_000.0 / snapshot.totalPlayCount
             cards += StatCard(
-                label = "Avg. Per Song",
+                label = "Avg. Per Play",
                 value = String.format(Locale.US, "%.1f min", avgMinutes),
                 numericValue = avgMinutes.toFloat(),
                 icon = "\u23F0",
@@ -206,10 +217,12 @@ class StatsViewModel @Inject constructor(
      * zero, so an empty grid stays empty. The previous version filled every one of the 168
      * cells with a random number, which drew a convincing "you listen most at 8 PM" pattern
      * for a user who had never opened the app.
+     *
+     * Weight comes from `listenedMs`, not the nominal `durationMs`: credit is for time actually
+     * spent listening, and it is attributed to the hour the play *started*, which is the only
+     * timestamp the table keeps.
      */
-    private fun buildHeatmap(
-        history: List<com.crank.music.data.local.HistoryEntity>,
-    ): List<HeatmapCell> {
+    private fun buildHeatmap(history: List<HistoryEntity>): List<HeatmapCell> {
         // days[day][hour] = accumulated minutes
         val minutes = Array(7) { IntArray(24) }
         val calendar = Calendar.getInstance()
@@ -219,7 +232,7 @@ class StatsViewModel @Inject constructor(
             // Calendar.SUNDAY is 1; shift so Monday is 0 to match the UI's column order.
             val day = (calendar.get(Calendar.DAY_OF_WEEK) + 5) % 7
             val hour = calendar.get(Calendar.HOUR_OF_DAY)
-            minutes[day][hour] += (entry.durationMs / 60_000L).toInt()
+            minutes[day][hour] += (entry.listenedMs / 60_000L).toInt()
         }
 
         return buildList {
@@ -234,17 +247,22 @@ class StatsViewModel @Inject constructor(
     /**
      * Badges, evaluated against real counters.
      *
-     * Earned badges carry no date: the history table keeps only the most recent play per song,
-     * so the date a threshold was first crossed is not recoverable. Showing an empty date is
-     * honest; the previous list showed exact-looking dates that were hardcoded.
+     * "Century Club" is now measured on total plays (`playCount`), not distinct songs, so it
+     * reflects how much the user actually listens rather than how wide their library is; the
+     * distinct-song count drives its own card instead.
+     *
+     * Earned badges carry no date: the history table dates a song by its most recent play, so the
+     * date a threshold was first crossed is not recoverable. Showing an empty date is honest; the
+     * previous list showed exact-looking dates that were hardcoded.
      */
-    private fun buildBadges(
-        history: List<com.crank.music.data.local.HistoryEntity>,
-        totalMinutes: Double,
-    ): List<Badge> {
-        val songCount = history.size
-        val uniqueArtists = history.map { it.artistName }.filter { it.isNotBlank() }.distinct().size
-        val hours = totalMinutes / 60.0
+    private fun buildBadges(snapshot: StatsSnapshot): List<Badge> {
+        val playCount = snapshot.totalPlayCount
+        val uniqueArtists = snapshot.history
+            .map { it.artistName }
+            .filter { it.isNotBlank() }
+            .distinct()
+            .size
+        val hours = snapshot.totalListenedMs / 3_600_000.0
 
         return listOf(
             Badge(
@@ -252,16 +270,16 @@ class StatsViewModel @Inject constructor(
                 name = "First Listen",
                 icon = "\uD83C\uDFB5",
                 description = "Play your first song",
-                isEarned = songCount >= 1,
-                progress = if (songCount >= 1) 0f else 0f,
+                isEarned = playCount >= 1,
+                progress = if (playCount >= 1) 1f else 0f,
             ),
             Badge(
                 id = "century",
                 name = "Century Club",
                 icon = "\uD83D\uDCAF",
-                description = "Play 100 different songs",
-                isEarned = songCount >= 100,
-                progress = (songCount / 100f).coerceIn(0f, 1f),
+                description = "Play 100 songs",
+                isEarned = playCount >= 100,
+                progress = (playCount / 100f).coerceIn(0f, 1f),
             ),
             Badge(
                 id = "explorer",
@@ -290,12 +308,9 @@ class StatsViewModel @Inject constructor(
         )
     }
 
-    private fun buildTimeline(history: List<com.crank.music.data.local.HistoryEntity>): List<TimelinePoint> =
-        buildTimelineFor(_uiState.value.selectedPeriod, history)
-
     private fun buildTimelineFor(
         period: TimePeriod,
-        history: List<com.crank.music.data.local.HistoryEntity> = lastHistory,
+        history: List<HistoryEntity> = lastHistory,
     ): List<TimelinePoint> {
         if (history.isEmpty()) return emptyList()
 
@@ -303,7 +318,7 @@ class StatsViewModel @Inject constructor(
         val buckets = LinkedHashMap<String, Float>()
         val order = mutableListOf<String>()
 
-        fun bucketKey(entry: com.crank.music.data.local.HistoryEntity, label: String): String {
+        fun bucketKey(label: String): String {
             if (!buckets.containsKey(label)) order += label
             return label
         }
@@ -320,15 +335,17 @@ class StatsViewModel @Inject constructor(
                 )
                 TimePeriod.YEARLY -> calendar.get(Calendar.YEAR).toString()
             }
-            val key = bucketKey(entry, label)
-            buckets[key] = (buckets[key] ?: 0f) + entry.durationMs / 60_000f
+            val key = bucketKey(label)
+            // Listened time, not nominal duration: a skipped track should not add its full length
+            // to the chart. Matches the heatmap and the "Total Listening" card.
+            buckets[key] = (buckets[key] ?: 0f) + entry.listenedMs / 60_000f
         }
 
         return order.map { label -> TimelinePoint(label, buckets[label] ?: 0f) }
     }
 
     /** Latest history, cached so [selectPeriod] can rebuild without another database read. */
-    private var lastHistory: List<com.crank.music.data.local.HistoryEntity> = emptyList()
+    private var lastHistory: List<HistoryEntity> = emptyList()
 
     private fun formatHours(hours: Double): String = when {
         hours <= 0.0 -> "0h"

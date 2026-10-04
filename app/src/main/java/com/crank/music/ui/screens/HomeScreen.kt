@@ -31,16 +31,18 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.crank.music.R
 import com.crank.music.domain.model.Album
 import com.crank.music.domain.model.Song
 import com.crank.music.feature.ytmusic.YtArtistCard
@@ -56,6 +58,7 @@ import com.crank.music.feature.ytmusic.YtMusicHomeViewModel
 import com.crank.music.feature.ytmusic.YtQuickPickCard
 import com.crank.music.feature.ytmusic.YtSectionHeader
 import com.crank.music.feature.ytmusic.YtTrendingCard
+import com.crank.music.ui.components.ErrorState
 import com.crank.music.ui.components.NotificationPanel
 import com.crank.music.ui.theme.CrankSpacing
 import com.crank.music.ui.viewmodel.NotificationViewModel
@@ -80,8 +83,8 @@ fun HomeScreen(
     onAlbumClick: (Album) -> Unit = {},
     onArtistClick: (String) -> Unit = {},
 ) {
-    val notifState by notificationViewModel.uiState.collectAsState()
-    val feedState by ytMusicHomeViewModel.uiState.collectAsState()
+    val notifState by notificationViewModel.uiState.collectAsStateWithLifecycle()
+    val feedState by ytMusicHomeViewModel.uiState.collectAsStateWithLifecycle()
     val view = androidx.compose.ui.platform.LocalView.current
 
     NotificationPanel(viewModel = notificationViewModel)
@@ -327,25 +330,15 @@ fun HomeScreen(
             // Error / retry -------------------------------------------------------------
             feedState.errorMessage?.let { message ->
                 item {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = CrankSpacing.M),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                    ) {
-                        Text(
-                            text = message,
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Button(onClick = {
+                    ErrorState(
+                        title = stringResource(R.string.error_feed_title),
+                        message = message,
+                        modifier = Modifier.padding(horizontal = CrankSpacing.M),
+                        onRetry = {
                             ytMusicHomeViewModel.dismissError()
                             ytMusicHomeViewModel.load()
-                        }) {
-                            Text("Retry")
                         }
-                    }
+                    )
                 }
             }
         }

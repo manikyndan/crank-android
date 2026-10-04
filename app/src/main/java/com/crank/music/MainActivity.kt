@@ -9,7 +9,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.isSystemInDarkTheme
-import androidx.compose.runtime.collectAsState
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -64,9 +64,11 @@ class MainActivity : ComponentActivity() {
         pendingRoute = intent?.getStringExtra(EXTRA_NAVIGATE_TO)
 
         val initialMode = themePreference.initialMode()
+        val initialAppearance = themePreference.initialAppearance()
 
         setContent {
-            val mode by themePreference.mode.collectAsState()
+            val mode by themePreference.mode.collectAsStateWithLifecycle()
+            val appearance by themePreference.appearance.collectAsStateWithLifecycle()
 
             // `AUTO` is the only mode whose answer depends on the system setting, and this is
             // the only layer that can observe it. `isSystemInDarkTheme` is a composable read,
@@ -74,7 +76,16 @@ class MainActivity : ComponentActivity() {
             val systemInDarkTheme = isSystemInDarkTheme()
             val effectiveMode = mode ?: initialMode
 
-            CrankTheme(darkTheme = !effectiveMode.isLight(systemInDarkTheme)) {
+            // Falls back to the synchronously-read value for the first frame, so the accent and text
+            // scale are already correct on the very first composition rather than one frame later.
+            val effectiveAppearance =
+                appearance.takeIf { it.isLoaded } ?: initialAppearance
+
+            CrankTheme(
+                darkTheme = !effectiveMode.isLight(systemInDarkTheme),
+                accentArgb = effectiveAppearance.accentArgb,
+                typographyScale = effectiveAppearance.typographyScale,
+            ) {
                 MainScreen(
                     startRoute = pendingRoute,
                     onRouteConsumed = { pendingRoute = null },

@@ -28,7 +28,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -65,7 +65,7 @@ fun ProfileScreen(
     onStatsClick: () -> Unit = {},
     onRecognizeClick: () -> Unit = {}
 ) {
-    val uiState by profileViewModel.uiState.collectAsState()
+    val uiState by profileViewModel.uiState.collectAsStateWithLifecycle()
 
     val quickActions = listOf(
         QuickActionItem("Settings", Icons.Default.Settings, onSettingsClick),
@@ -153,13 +153,13 @@ fun ProfileScreen(
                         modifier = Modifier.weight(1f)
                     )
                     StatCard(
-                        label = "Top Genre",
-                        value = uiState.topGenre,
+                        label = "Favorite Artist",
+                        value = uiState.favoriteArtist,
                         modifier = Modifier.weight(1f)
                     )
                     StatCard(
-                        label = "Streak",
-                        value = uiState.monthlyStreak,
+                        label = "Total Plays",
+                        value = uiState.totalPlays,
                         modifier = Modifier.weight(1f)
                     )
                 }

@@ -1,0 +1,432 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pending Tasks — Developer Status Dashboard</title>
+<style>
+  :root {
+    --bg: #0b0b0c;
+    --panel: #0f1011;
+    --border: #2a2d31;
+    --border-soft: #1e2124;
+    --text: #d6d9dd;
+    --muted: #8b9198;
+    --heading: #4cc2ff;
+    --link: #5ac8fa;
+    --red: #ff4d4f;
+    --yellow: #f5c542;
+    --green: #3fb950;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: var(--bg);
+    color: var(--text);
+  }
+
+  body {
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+                 "Liberation Mono", "DejaVu Sans Mono", monospace;
+    font-size: 13px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap {
+    max-width: 1180px;
+    margin: 0 auto;
+    padding: 28px 24px 56px;
+  }
+
+  /* ---------- header ---------- */
+  .prompt {
+    color: var(--muted);
+    font-size: 12px;
+    margin-bottom: 14px;
+    letter-spacing: 0.02em;
+  }
+  .prompt .sig { color: var(--green); }
+
+  h1 {
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--heading);
+    margin: 0 0 10px;
+    letter-spacing: 0.02em;
+  }
+
+  .status-msg {
+    border: 1px solid var(--border);
+    border-left: 2px solid var(--heading);
+    background: var(--panel);
+    padding: 12px 14px;
+    margin: 0 0 30px;
+    color: var(--text);
+    border-radius: 2px;
+  }
+
+  /* ---------- section ---------- */
+  section {
+    margin-bottom: 34px;
+  }
+
+  .sec-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 12px;
+  }
+
+  .dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    flex: 0 0 auto;
+    display: inline-block;
+  }
+  .dot.red    { background: var(--red);    box-shadow: 0 0 8px rgba(255,77,79,.55); }
+  .dot.yellow { background: var(--yellow); box-shadow: 0 0 8px rgba(245,197,66,.5); }
+  .dot.green  { background: var(--green);  box-shadow: 0 0 8px rgba(63,185,80,.5); }
+
+  .sec-title {
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+  .sec-title.red    { color: var(--red); }
+  .sec-title.yellow { color: var(--yellow); }
+  .sec-title.green  { color: var(--green); }
+
+  .sec-sub {
+    color: var(--muted);
+    font-size: 12px;
+    margin-left: 2px;
+  }
+
+  /* ---------- table ---------- */
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    border: 1px solid var(--border);
+    background: var(--panel);
+    table-layout: fixed;
+  }
+
+  caption {
+    caption-side: top;
+    text-align: left;
+    color: var(--muted);
+    font-size: 11px;
+    padding-bottom: 6px;
+    letter-spacing: 0.04em;
+  }
+
+  th, td {
+    border: 1px solid var(--border);
+    padding: 9px 12px;
+    text-align: left;
+    vertical-align: top;
+    word-wrap: break-word;
+    overflow-wrap: break-word;
+  }
+
+  thead th {
+    background: #131416;
+    color: var(--heading);
+    font-weight: 600;
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
+
+  tbody tr:nth-child(even) td { background: #0d0e10; }
+  tbody tr:hover td { background: #14171a; }
+
+  td.num {
+    color: var(--muted);
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    width: 48px;
+    white-space: nowrap;
+  }
+
+  /* column widths */
+  .w-num  { width: 48px; }
+  .w-item { width: 46%; }
+  .w-rest { width: auto; }
+  .w-size { width: 30%; }
+
+  .item {
+    color: var(--link);
+    font-weight: 600;
+  }
+  .item .path { color: var(--link); }
+  .item .sub {
+    display: block;
+    color: var(--muted);
+    font-weight: 400;
+    margin-top: 3px;
+  }
+
+  .why { color: var(--text); }
+  .why .label { color: var(--muted); }
+
+  code {
+    font-family: inherit;
+    color: #e3b7ff;
+    background: #16181b;
+    border: 1px solid var(--border-soft);
+    padding: 0 4px;
+    border-radius: 2px;
+    font-size: 12px;
+  }
+
+  .tag {
+    display: inline-block;
+    font-size: 10px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--muted);
+    border: 1px solid var(--border);
+    border-radius: 2px;
+    padding: 1px 6px;
+    margin-left: 6px;
+    vertical-align: 1px;
+  }
+
+  /* single-column table */
+  table.single td.itemcell { width: 100%; }
+
+  /* ---------- recommendation ---------- */
+  .reco {
+    border: 1px solid var(--border);
+    border-left: 2px solid var(--green);
+    background: var(--panel);
+    padding: 12px 14px;
+    margin-top: 6px;
+    border-radius: 2px;
+  }
+  .reco .k { color: var(--green); font-weight: 600; }
+  .reco code { color: var(--link); }
+
+  footer {
+    color: var(--muted);
+    font-size: 11px;
+    margin-top: 34px;
+    border-top: 1px solid var(--border-soft);
+    padding-top: 10px;
+    letter-spacing: 0.03em;
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="prompt"><span class="sig">$</span> crank-android &mdash; status --pending --grouped</div>
+
+  <h1>// PENDING TASKS &mdash; DEVELOPER STATUS DASHBOARD</h1>
+
+  <div class="status-msg">
+    Yes &mdash; here's everything still pending, grouped so you can see at a glance.
+    Nothing from the bug-fix list is unfinished; these are the remaining advisories,
+    asset gaps, and verifications.
+  </div>
+
+  <!-- ================= RED ================= -->
+  <section>
+    <div class="sec-head">
+      <span class="dot red"></span>
+      <span class="sec-title red">Red &mdash; Needs something only you can provide</span>
+    </div>
+
+    <table>
+      <colgroup>
+        <col class="w-num"><col class="w-item"><col class="w-rest">
+      </colgroup>
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Pending item</th>
+          <th>Why it's waiting</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="num">1</td>
+          <td class="item">
+            <span class="path">app/src/main/assets/po_token.html</span>
+          </td>
+          <td class="why">
+            <span class="label">Why:</span>
+            The BotGuard asset is deliberately not committable upstream. Without it, playback
+            degrades to preview-length streams (~60&ndash;90&nbsp;s then dies). A startup log
+            warning was added, but only the user can place the file.
+          </td>
+        </tr>
+        <tr>
+          <td class="num">2</td>
+          <td class="item">
+            Real update server for the Update Checker
+          </td>
+          <td class="why">
+            <span class="label">Why:</span>
+            <code>checkForUpdates()</code> still always reports <code>v2.0.0</code> with a
+            fabricated changelog &mdash; building a real one needs an update-manifest endpoint
+            that doesn't exist.
+          </td>
+        </tr>
+        <tr>
+          <td class="num">3</td>
+          <td class="item">
+            Launcher icons
+          </td>
+          <td class="why">
+            <span class="label">Why:</span>
+            <code>ic_launcher_round.png</code> is byte-for-byte identical to
+            <code>ic_launcher.png</code>. The round icon isn't actually round. Needs a real
+            design asset or a decision to remove <code>android:roundIcon</code> from the manifest.
+          </td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+
+  <!-- ================= YELLOW ================= -->
+  <section>
+    <div class="sec-head">
+      <span class="dot yellow"></span>
+      <span class="sec-title yellow">Yellow &mdash; I can do these now &mdash; say the word</span>
+    </div>
+
+    <table>
+      <colgroup>
+        <col class="w-num"><col class="w-item"><col class="w-size">
+      </colgroup>
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Pending item</th>
+          <th>Size</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="num">4</td>
+          <td class="item">
+            Unused resources
+            <span class="sub">
+              Delete the two never-wired template files
+              (<code>backup_rules.xml</code>, <code>data_extraction_rules.xml</code>)
+              and the unused <code>crank_music_box_desc</code> string
+            </span>
+          </td>
+          <td><code>3 deletions, zero behavior change</code></td>
+        </tr>
+        <tr>
+          <td class="num">5</td>
+          <td class="item">
+            UseKtx
+            <span class="sub">
+              Replace <code>Uri.parse(streamUrl)</code> with <code>streamUrl.toUri()</code>
+              in <code>DownloadRepositoryImpl</code>
+            </span>
+          </td>
+          <td><code>1 line</code></td>
+        </tr>
+        <tr>
+          <td class="num">6</td>
+          <td class="item">
+            New unit tests for the logic I wrote
+            <span class="sub">
+              <code>removeDownload</code> like-preservation, <code>confirmHaptic</code> API
+              branching, purge/delete ordering and expiry math
+            </span>
+          </td>
+          <td><code>small test files</code></td>
+        </tr>
+        <tr>
+          <td class="num">7</td>
+          <td class="item">
+            Dependency upgrades
+            <span class="sub">
+              24 <code>GradleDependency</code> + 11 <code>NewerVersionAvailable</code>
+              advisories (Media3, Room, Ktor, AGP, etc.)
+            </span>
+          </td>
+          <td><code>risky, needs per-library release-note review + full re-test</code></td>
+        </tr>
+        <tr>
+          <td class="num">8</td>
+          <td class="item">
+            Instrumented tests in CI
+            <span class="sub">
+              <code>connectedDebugAndroidTest</code> exists in
+              <code>app/src/androidTest</code> but CI never runs it
+            </span>
+          </td>
+          <td><code>medium CI work</code></td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+
+  <!-- ================= GREEN ================= -->
+  <section>
+    <div class="sec-head">
+      <span class="dot green"></span>
+      <span class="sec-title green">Green &mdash; Only verifiable on a real device / your side</span>
+    </div>
+
+    <table class="single">
+      <colgroup>
+        <col class="w-num"><col>
+      </colgroup>
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Pending item</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="num">9</td>
+          <td class="itemcell">
+            End-to-end playback (stream resolve &rarr; play &rarr; skip &rarr; lyrics)
+            &mdash; needs network + the PoToken asset
+          </td>
+        </tr>
+        <tr>
+          <td class="num">10</td>
+          <td class="itemcell">
+            Notification / lock-screen / Bluetooth skip &mdash; relies on the Media3 callback;
+            the deprecation fix should be tried by hand
+          </td>
+        </tr>
+        <tr>
+          <td class="num">11</td>
+          <td class="itemcell">
+            Android 7.x (API 24/25) launch + Now Playing &mdash; the three crashes fixed can only
+            be truly proven on an old device or an API-24 emulator
+          </td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+
+  <div class="reco">
+    <span class="k">My recommendation:</span>
+    do <code>#4</code> + <code>#5</code> + <code>#6</code> (safe, quick, and they make the tree
+    lint-clean), and you decide on <code>#1</code>&ndash;<code>#3</code> whenever ready.
+  </div>
+
+  <footer>11 pending items &mdash; 3 red &middot; 5 yellow &middot; 3 green</footer>
+
+</div>
+</body>
+</html>

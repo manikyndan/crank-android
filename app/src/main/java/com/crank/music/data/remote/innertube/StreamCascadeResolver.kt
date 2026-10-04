@@ -40,6 +40,8 @@ class StreamCascadeResolver(
      *   answer `LOGIN_REQUIRED` with zero formats.
      * @param dataSyncId the account-scoped id, used when signed in.
      * @param playlistId used to detect uploaded tracks, which only TVHTML5 will serve.
+     * @param maxBitrateKbps the user's quality ceiling for this request, or null for "best
+     *   available". Passed through to [selectAudioFormat].
      */
     suspend fun resolve(
         videoId: String,
@@ -47,6 +49,7 @@ class StreamCascadeResolver(
         dataSyncId: String?,
         isLoggedIn: Boolean,
         playlistId: String? = null,
+        maxBitrateKbps: Int? = null,
     ): StreamResolution {
         val attempts = mutableListOf<ClientAttempt>()
 
@@ -141,6 +144,7 @@ class StreamCascadeResolver(
                 dataSyncId = dataSyncId,
                 poToken = poToken,
                 playlistId = playlistId,
+                maxBitrateKbps = maxBitrateKbps,
             )
             Log.i(TAG, "resolve: ${client.clientName} -> ${outcome::class.simpleName}")
 
@@ -236,6 +240,7 @@ class StreamCascadeResolver(
         dataSyncId: String?,
         poToken: PoTokenResult?,
         playlistId: String?,
+        maxBitrateKbps: Int? = null,
     ): ClientOutcome {
         val response =
             try {
@@ -278,7 +283,7 @@ class StreamCascadeResolver(
             return ClientOutcome.Failure(ClientAttempt.Outcome.NO_EXPIRY, null)
         }
 
-        val format = selectAudioFormat(streamingData.allFormats)
+        val format = selectAudioFormat(streamingData.allFormats, maxBitrateKbps)
             ?: return ClientOutcome.Failure(ClientAttempt.Outcome.NO_FORMATS, null)
 
         val rawUrl =
@@ -315,21 +320,40 @@ class StreamCascadeResolver(
      * Prefers audio-only. A muxed format is accepted only as a fallback, because it carries
      * video that an audio app will never display but will still download.
      *
-     * Among audio-only candidates the highest bitrate wins, with `averageBitrate` used as a
+     * @param maxBitrateKbps the user's effective quality ceiling, from the audio-quality setting and
+     *   the active network. When set, the highest-bitrate format *at or below* it wins. Previously
+     *   this parameter did not exist and the highest bitrate always won, so choosing "Low" or
+     *   enabling Data Saver changed nothing about what was actually downloaded.
+     *
+     *   The ceiling is a preference, not a hard filter: if nothing is available under it (formats
+     *   frequently report 0 or omit the bitrate entirely) the highest available is used instead of
+     *   failing the play. Silence about the real bitrate is better than a track that will not play.
+     *
+     * Among equally-scored candidates the highest bitrate wins, with `averageBitrate` as a
      * tie-break — `bitrate` alone is frequently absent or identical across formats.
      */
     private fun selectAudioFormat(
         formats: List<InnerTubePlayerResponse.Format>,
+        maxBitrateKbps: Int? = null,
     ): InnerTubePlayerResponse.Format? {
         val audioOnly = formats.filter { it.isAudioOnly }
         val candidates = audioOnly.ifEmpty { formats.filter { it.hasAudio } }
 
-        return candidates.maxByOrNull { format ->
-            // Formats without a usable URL are ranked last rather than filtered out, so that a
-            // client offering only ciphered formats still gets a chance to decipher them.
-            val score = (format.bitrate ?: format.averageBitrate ?: 0).toLong()
-            if (format.url == null && !format.isCiphered) -1L else score
-        }?.takeIf { it.url != null || it.isCiphered }
+        fun bitrateOf(format: InnerTubePlayerResponse.Format): Long =
+            (format.bitrate ?: format.averageBitrate ?: 0).toLong()
+
+        // Formats without a usable URL are ranked last rather than filtered out, so that a
+        // client offering only ciphered formats still gets a chance to decipher them.
+        fun rank(format: InnerTubePlayerResponse.Format): Long =
+            if (format.url == null && !format.isCiphered) -1L else bitrateOf(format)
+
+        val underCeiling = maxBitrateKbps
+            ?.let { ceiling -> candidates.filter { rank(it) in 1..(ceiling * 1000L) } }
+            ?.takeIf { it.isNotEmpty() }
+
+        return (underCeiling ?: candidates)
+            .maxByOrNull { rank(it) }
+            ?.takeIf { it.url != null || it.isCiphered }
     }
 
     /**
